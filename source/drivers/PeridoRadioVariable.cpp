@@ -1,5 +1,5 @@
 #include "PeridoRadioCloud.h"
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "MicroBitCompat.h"
 #include "ErrorNo.h"
 #include "MicroBitEvent.h"
@@ -45,7 +45,7 @@ void PeridoRadioVariable::handlePacket(uint16_t id)
 
     if (c && !(t->request_type & (REQUEST_STATUS_OK | REQUEST_STATUS_ERROR)))
     {
-        DynamicType dt(c->packet->length - MICROBIT_PERIDO_HEADER_SIZE - CLOUD_HEADER_SIZE, t->payload, 0);
+        DynamicType dt(c->packet->length - TDMA_CAT_HEADER_SIZE - CLOUD_HEADER_SIZE, t->payload, 0);
         uint16_t namespaceHash = dt.getInteger(0);
         uint16_t variableHash = dt.getInteger(1);
 

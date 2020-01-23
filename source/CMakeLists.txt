@@ -43,7 +43,6 @@ set(YOTTA_AUTO_MICROBIT-DAL_CPP_FILES
     "drivers/MicroBitPin.cpp"
     "drivers/MicroBitQuadratureDecoder.cpp"
     "drivers/MicroBitRadio.cpp"
-    "drivers/MicroBitPeridoRadio.cpp"
     "drivers/MicroBitRadioDatagram.cpp"
     "drivers/MicroBitRadioEvent.cpp"
     "drivers/Radio.cpp"
@@ -51,6 +50,8 @@ set(YOTTA_AUTO_MICROBIT-DAL_CPP_FILES
     "drivers/RadioDatagram.cpp"
     "drivers/RadioEvent.cpp"
     "drivers/RadioREST.cpp"
+    "drivers/TDMACAT.cpp"
+    "drivers/TDMACATRadio.cpp"
 
     "drivers/DebugBridge.cpp"
     "drivers/PeridoBridge.cpp"

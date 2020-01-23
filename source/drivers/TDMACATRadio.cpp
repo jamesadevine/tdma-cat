@@ -27,7 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "MicroBitComponent.h"
 #include "EventModel.h"
 #include "MicroBitDevice.h"
@@ -36,10 +36,10 @@ DEALINGS IN THE SOFTWARE.
 #include "MicroBitBLEManager.h"
 #include "MicroBitHeapAllocator.h"
 
-MicroBitPeridoRadio* MicroBitPeridoRadio::instance = NULL;
+TDMACATRadio* TDMACATRadio::instance = NULL;
 
 #define TIME_TO_TRANSMIT_BYTE_1MB   8
-#define TX_PACKETS_SIZE             (2 * MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS)
+#define TX_PACKETS_SIZE             (2 * TDMA_CAT_MAXIMUM_TX_BUFFERS)
 
 volatile uint32_t packets_received = 0;
 volatile uint32_t packets_error = 0;
@@ -53,18 +53,32 @@ volatile uint8_t  tx_packets_head = 0;
 volatile uint8_t  tx_packets_tail = 0;
 volatile uint32_t tx_packets[TX_PACKETS_SIZE] = { 0 };
 
-#define RADIO_STATE_RECEIVE  (1)
-#define RADIO_STATE_TRANSMIT  (2)
-#define RADIO_STATE_FORWARD  (3)
-#define RADIO_STATE_DISCOVER  (4)
-
-
 /**
   * Driver configuration flags
   **/
-#define MICROBIT_PERIDO_ASSERT 1
+#define TDMA_CAT_ASSERT 1
+
+// 20 [txen][CC0], 21[rxen][CC0], 22[dis][CC1], 27[END][CC2]
+#define TX_EN_PPI_CHAN_BIT_POS      20
+#define RX_EN_PPI_CHAN_BIT_POS      21
+#define DIS_PPI_CHAN_BIT_POS        22
+#define END_CC_PPI_CHAN_BIT_POS     27
+
+#define TIMER_CC_TX_RX              0
+#define TIMER_CC_DISABLE            1
+#define TIMER_CC_TIMESTAMP          2
+#define TIMER_CC_TDMA               3
+
+#define RADIO_STATE_RECEIVE     (1)
+#define RADIO_STATE_TRANSMIT    (2)
+#define RADIO_STATE_FORWARD     (3)
+#define RADIO_STATE_DISCOVER    (4)
+
+#define TDMA_STATE_DISCOVER     (1)
+#define TDMA_STATE_NORMAL       (2)
 
 volatile uint8_t radioState = RADIO_STATE_RECEIVE;
+volatile uint8_t tdmaState = TDMA_STATE_DISCOVER;
 
 TestRole testRole;
 
@@ -72,7 +86,7 @@ void timer_callback(uint8_t) {}
 
 
 extern void set_transmission_reception_gpio(int);
-extern void process_packet(PeridoFrameBuffer* p, bool, int);
+extern void process_packet(TDMACATSuperFrame* p, bool, int);
 
 #pragma GCC push_options
 #pragma GCC optimize ("O0")
@@ -87,15 +101,15 @@ volatile int hw_state = 0;
 extern "C" void RADIO_IRQHandler(void)
 {
     NRF_RADIO->EVENTS_END = 0;
-    PeridoFrameBuffer *p = MicroBitPeridoRadio::instance->rxBuf;
+    TDMACATSuperFrame *p = TDMACATRadio::instance->rxBuf;
 
     if (radioState == RADIO_STATE_FORWARD)
     {
         radioState = RADIO_STATE_RECEIVE;
-        memset(p, 0, sizeof(PeridoFrameBuffer));
-        NRF_RADIO->PACKETPTR = (uint32_t)MicroBitPeridoRadio::instance->rxBuf;
+        memset(p, 0, sizeof(TDMACATSuperFrame));
+        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
 #endif
         NRF_RADIO->TASKS_RXEN = 1;
@@ -106,7 +120,7 @@ extern "C" void RADIO_IRQHandler(void)
         return;
     }
 
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
     if (radioState == RADIO_STATE_RECEIVE)
     {
         if (testRole == Repeater)
@@ -119,7 +133,7 @@ extern "C" void RADIO_IRQHandler(void)
                     p->ttl--;
                     radioState = RADIO_STATE_FORWARD;
                     NRF_RADIO->PACKETPTR = (uint32_t)p;
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
                     HW_ASSERT(0,0);
 #endif
                     NRF_RADIO->EVENTS_DISABLED = 0;
@@ -127,6 +141,9 @@ extern "C" void RADIO_IRQHandler(void)
                     volatile int i = 250;
                     while(i-- > 0);
                     NRF_RADIO->TASKS_START = 1;
+
+                    // back porch here
+
                     return;
                 }
             }
@@ -135,7 +152,7 @@ extern "C" void RADIO_IRQHandler(void)
                 packets_error++;
             }
             NRF_RADIO->PACKETPTR = (uint32_t)p;
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
             HW_ASSERT(0,0);
 #endif
             NRF_RADIO->EVENTS_DISABLED = 0;
@@ -152,14 +169,14 @@ extern "C" void RADIO_IRQHandler(void)
 
             packets_received++;
             NRF_RADIO->PACKETPTR = (uint32_t)p;
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
             HW_ASSERT(0,0);
 #endif
             NRF_RADIO->EVENTS_DISABLED = 0;
             NRF_RADIO->TASKS_RXEN = 1;
 
             process_packet(p, NRF_RADIO->CRCSTATUS == 1, NRF_RADIO->RSSISAMPLE);
-            memset(p, 0, sizeof(PeridoFrameBuffer));
+            memset(p, 0, sizeof(TDMACATSuperFrame));
             volatile int i = 250;
             while(i-- > 0);
             NRF_RADIO->TASKS_START = 1;
@@ -176,7 +193,7 @@ extern "C" void RADIO_IRQHandler(void)
                 p->ttl--;
                 radioState = RADIO_STATE_FORWARD;
                 NRF_RADIO->PACKETPTR = (uint32_t)p;
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
                 HW_ASSERT(0,0);
 #endif
                 NRF_RADIO->EVENTS_DISABLED = 0;
@@ -192,7 +209,7 @@ extern "C" void RADIO_IRQHandler(void)
 
         packets_received++;
         NRF_RADIO->PACKETPTR = (uint32_t)p;
-#if MICROBIT_PERIDO_ASSERT == 1
+#if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
 #endif
         NRF_RADIO->EVENTS_DISABLED = 0;
@@ -204,9 +221,9 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_TRANSMIT)
     {
         radioState = RADIO_STATE_RECEIVE;
-        NRF_RADIO->PACKETPTR = (uint32_t)MicroBitPeridoRadio::instance->rxBuf;
+        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
         HW_ASSERT(0,0);
 #endif
         NRF_RADIO->EVENTS_DISABLED = 0;
@@ -216,19 +233,21 @@ extern "C" void RADIO_IRQHandler(void)
         volatile int i = 250;
         while(i-- > 0);
         NRF_RADIO->TASKS_START = 1;
+
+        // back porch here
         return;
     }
 }
 
 #endif
 
-void manual_poke(PeridoFrameBuffer* p)
+void manual_poke(TDMACATSuperFrame* p)
 {
     NRF_RADIO->TASKS_DISABLE = 1;
     while (NRF_RADIO->EVENTS_DISABLED == 0);
     NRF_RADIO->EVENTS_DISABLED = 0;
 
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
         HW_ASSERT(0,0);
 #endif
 
@@ -246,12 +265,12 @@ void manual_poke(PeridoFrameBuffer* p)
 /**
   * Constructor.
   *
-  * Initialise the MicroBitPeridoRadio.
+  * Initialise the TDMACATRadio.
   *
   * @note This class is demand activated, as a result most resources are only
   *       committed if send/recv or event registrations calls are made.
   */
-MicroBitPeridoRadio::MicroBitPeridoRadio(LowLevelTimer& timer, uint8_t appId, uint16_t id) : timer(timer), cloud(*this, MICROBIT_PERIDO_CLOUD_NAMESPACE), datagram(*this, MICROBIT_PERIDO_DATAGRAM_NAMESPACE), event(*this, MICROBIT_PERIDO_EVENT_NAMESPACE)
+TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint8_t appId, uint16_t id) : timer(timer), cloud(*this, TDMA_CAT_CLOUD_NAMESPACE), datagram(*this, TDMA_CAT_DATAGRAM_NAMESPACE), event(*this, TDMA_CAT_EVENT_NAMESPACE)
 {
     this->id = id;
     this->appId = appId;
@@ -261,11 +280,11 @@ MicroBitPeridoRadio::MicroBitPeridoRadio(LowLevelTimer& timer, uint8_t appId, ui
 
     this->rxBuf = NULL;
 
-    memset(this->rxArray, 0, sizeof(PeridoFrameBuffer*) * MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS);
+    memset(this->rxArray, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_MAXIMUM_TX_BUFFERS);
     this->rxHead = 0;
     this->rxTail = 0;
 
-    memset(this->txArray, 0, sizeof(PeridoFrameBuffer*) * MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS);
+    memset(this->txArray, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_MAXIMUM_TX_BUFFERS);
     this->txHead = 0;
     this->txTail = 0;
 
@@ -282,7 +301,11 @@ MicroBitPeridoRadio::MicroBitPeridoRadio(LowLevelTimer& timer, uint8_t appId, ui
     // 16 Mhz / 2^4 = 1 Mhz
     timer.setPrescaler(4);
 
-    // timer.enable();
+    NRF_TIMER0->TASKS_CLEAR = 1;
+
+    NRF_TIMER0->CC[0] = 0;
+
+    NRF_TIMER0->CC[1] = 0;
 
     microbit_seed_random();
 
@@ -296,7 +319,7 @@ MicroBitPeridoRadio::MicroBitPeridoRadio(LowLevelTimer& timer, uint8_t appId, ui
   *
   * @return MICROBIT_OK on success, or MICROBIT_INVALID_PARAMETER if the value is out of range.
   */
-int MicroBitPeridoRadio::setTransmitPower(int power)
+int TDMACATRadio::setTransmitPower(int power)
 {
     if (power < 0 || power >= MICROBIT_BLE_POWER_LEVELS)
         return MICROBIT_INVALID_PARAMETER;
@@ -314,7 +337,7 @@ int MicroBitPeridoRadio::setTransmitPower(int power)
   * @return MICROBIT_OK on success, or MICROBIT_INVALID_PARAMETER if the value is out of range,
   *         or MICROBIT_NOT_SUPPORTED if the BLE stack is running.
   */
-int MicroBitPeridoRadio::setFrequencyBand(int band)
+int TDMACATRadio::setFrequencyBand(int band)
 {
     if (ble_running())
         return MICROBIT_NOT_SUPPORTED;
@@ -343,7 +366,7 @@ int MicroBitPeridoRadio::setFrequencyBand(int band)
   *
   * @return a pointer to the current receive buffer.
   */
-PeridoFrameBuffer* MicroBitPeridoRadio::getRxBuf()
+TDMACATSuperFrame* TDMACATRadio::getRxBuf()
 {
     return rxBuf;
 }
@@ -354,7 +377,7 @@ PeridoFrameBuffer* MicroBitPeridoRadio::getRxBuf()
   * @return MICROBIT_OK on success, or MICROBIT_NO_RESOURCES if a replacement receiver buffer
   *         could not be allocated (either by policy or memory exhaustion).
   */
-int MicroBitPeridoRadio::copyRxBuf()
+int TDMACATRadio::copyRxBuf()
 {
     if (rxBuf == NULL)
         return MICROBIT_INVALID_PARAMETER;
@@ -365,12 +388,12 @@ int MicroBitPeridoRadio::copyRxBuf()
         return MICROBIT_NO_RESOURCES;
 
     // Ensure that a replacement buffer is available before queuing.
-    PeridoFrameBuffer *newRxBuf = new PeridoFrameBuffer();
+    TDMACATSuperFrame *newRxBuf = new TDMACATSuperFrame();
 
     if (newRxBuf == NULL)
         return MICROBIT_NO_RESOURCES;
 
-    memcpy(newRxBuf, rxBuf, sizeof(PeridoFrameBuffer));
+    memcpy(newRxBuf, rxBuf, sizeof(TDMACATSuperFrame));
 
     // add our buffer to the array before updating the head
     // this ensures atomicity.
@@ -389,13 +412,13 @@ int MicroBitPeridoRadio::copyRxBuf()
   *
   * @return a pointer to the current receive buffer.
   */
-int MicroBitPeridoRadio::popTxQueue()
+int TDMACATRadio::popTxQueue()
 {
     if (this->txTail == this->txHead)
         return MICROBIT_OK;
 
-    uint8_t nextHead = (this->txHead + 1) % MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS;
-    PeridoFrameBuffer *p = txArray[nextHead];
+    uint8_t nextHead = (this->txHead + 1) % TDMA_CAT_MAXIMUM_TX_BUFFERS;
+    TDMACATSuperFrame *p = txArray[nextHead];
     this->txArray[nextHead] = NULL;
     this->txHead = nextHead;
     txQueueDepth--;
@@ -411,29 +434,29 @@ int MicroBitPeridoRadio::popTxQueue()
     return MICROBIT_OK;
 }
 
-PeridoFrameBuffer* MicroBitPeridoRadio::getCurrentTxBuf()
+TDMACATSuperFrame* TDMACATRadio::getCurrentTxBuf()
 {
     if (this->txTail == this->txHead)
         return NULL;
 
-    uint8_t nextTx = (this->txHead + 1) % MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS;
+    uint8_t nextTx = (this->txHead + 1) % TDMA_CAT_MAXIMUM_TX_BUFFERS;
     return this->txArray[nextTx];
 }
 
-int MicroBitPeridoRadio::queueTxBuf(PeridoFrameBuffer* tx)
+int TDMACATRadio::queueTxBuf(TDMACATSuperFrame* tx)
 {
-    uint8_t nextTail = (this->txTail + 1) % MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS;
+    uint8_t nextTail = (this->txTail + 1) % TDMA_CAT_MAXIMUM_TX_BUFFERS;
 
     if (nextTail == this->txHead)
         return MICROBIT_NO_RESOURCES;
 
     // Ensure that a replacement buffer is available before queuing.
-    PeridoFrameBuffer *newTx = new PeridoFrameBuffer();
+    TDMACATSuperFrame *newTx = new TDMACATSuperFrame();
 
     if (newTx == NULL)
         return MICROBIT_NO_RESOURCES;
 
-    memcpy(newTx, tx, sizeof(PeridoFrameBuffer));
+    memcpy(newTx, tx, sizeof(TDMACATSuperFrame));
 
     // add our buffer to the array before updating the head
     // this ensures atomicity.
@@ -447,15 +470,15 @@ int MicroBitPeridoRadio::queueTxBuf(PeridoFrameBuffer* tx)
     return MICROBIT_OK;
 }
 
-int MicroBitPeridoRadio::queueKeepAlive()
+int TDMACATRadio::queueKeepAlive()
 {
-    // PeridoFrameBuffer buf;
+    // TDMACATSuperFrame buf;
 
     // buf.id = microbit_random(65535);
-    // buf.length = 0 + MICROBIT_PERIDO_HEADER_SIZE - 1; // keep alive has no content.
+    // buf.length = 0 + TDMA_CAT_HEADER_SIZE - 1; // keep alive has no content.
     // buf.app_id = appId;
     // buf.namespace_id = 0;
-    // buf.flags |= MICROBIT_PERIDO_FRAME_KEEP_ALIVE_FLAG;
+    // buf.flags |= TDMA_CAT_FRAME_KEEP_ALIVE_FLAG;
     // buf.ttl = 2;
     // buf.initial_ttl = 2;
     // buf.time_since_wake = 0;
@@ -470,7 +493,7 @@ int MicroBitPeridoRadio::queueKeepAlive()
   *
   * @return MICROBIT_OK on success, MICROBIT_NOT_SUPPORTED if the BLE stack is running.
   */
-int MicroBitPeridoRadio::enable()
+int TDMACATRadio::enable()
 {
     // If the device is already initialised, then there's nothing to do.
     if (status & MICROBIT_RADIO_STATUS_INITIALISED)
@@ -482,7 +505,7 @@ int MicroBitPeridoRadio::enable()
 
     // If this is the first time we've been enable, allocate our receive buffers.
     if (rxBuf == NULL)
-        rxBuf = new PeridoFrameBuffer();
+        rxBuf = new TDMACATSuperFrame();
 
     if (rxBuf == NULL)
         return MICROBIT_NO_RESOURCES;
@@ -518,13 +541,13 @@ int MicroBitPeridoRadio::enable()
     // Statistically, this provides assurance to avoid other similar 2.4GHz protocols that may be in the vicinity.
     // We also map the assigned 8-bit GROUP id into the PREFIX field. This allows the RADIO hardware to perform
     // address matching for us, and only generate an interrupt when a packet matching our group is received.
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
     if (testRole == Collector)
         NRF_RADIO->BASE0 =  MICROBIT_RADIO_BASE_ADDRESS;
     else
-        NRF_RADIO->BASE0 =  MICROBIT_PERIDO_RADIO_BASE_ADDRESS;
+        NRF_RADIO->BASE0 =  TDMA_CAT_RADIO_BASE_ADDRESS;
 #else
-    NRF_RADIO->BASE0 =  MICROBIT_PERIDO_RADIO_BASE_ADDRESS;
+    NRF_RADIO->BASE0 =  TDMA_CAT_RADIO_BASE_ADDRESS;
 #endif
 
     NRF_RADIO->PREFIX0 = 0;
@@ -541,7 +564,7 @@ int MicroBitPeridoRadio::enable()
     // NRF_RADIO->PCNF1 = 0x02040000 | MICROBIT_RADIO_MAX_PACKET_SIZE;
     // NRF_RADIO->PCNF1 = 0x00040000 | MICROBIT_RADIO_MAX_PACKET_SIZE;
 
-    NRF_RADIO->PCNF1 = 0x02040000 | MICROBIT_PERIDO_MAX_PACKET_SIZE;
+    NRF_RADIO->PCNF1 = 0x02040000 | TDMA_CAT_MAX_PACKET_SIZE;
 
     // Most communication channels contain some form of checksum - a mathematical calculation taken based on all the data
     // in a packet, that is also sent as part of the packet. When received, this calculation can be repeated, and the results
@@ -562,7 +585,7 @@ int MicroBitPeridoRadio::enable()
     NRF_RADIO->EVENTS_READY = 0;
     NRF_RADIO->EVENTS_END = 0;
     // NRF_RADIO->TIFS = 300;
-    NRF_RADIO->PACKETPTR = (uint32_t)MicroBitPeridoRadio::instance->rxBuf;
+    NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
     NRF_RADIO->SHORTS = /*RADIO_SHORTS_READY_START_Msk |*/ RADIO_SHORTS_END_DISABLE_Msk | RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
 
     radioState = RADIO_STATE_RECEIVE;
@@ -573,6 +596,15 @@ int MicroBitPeridoRadio::enable()
     NVIC_ClearPendingIRQ(RADIO_IRQn);
     NVIC_SetPriority(RADIO_IRQn, 0);
     NVIC_EnableIRQ(RADIO_IRQn);
+
+    // set cc1 to trigger radio disable, set an end event to capture timestamp in cc2
+    NRF_PPI->CHEN |= (1 << DIS_PPI_CHAN_BIT_POS) | (1 << END_CC_PPI_CHAN_BIT_POS);
+
+    // disable after 2 seconds, and perform application tasks
+    NRF_TIMER0->CC[TIMER_CC_DISABLE] = 2000000;
+    NRF_TIMER0->CC[TIMER_CC_TDMA] = 2000000;
+
+    // need to express discovery states.
 
     NRF_RADIO->TASKS_RXEN = 1;
 
@@ -593,7 +625,7 @@ int MicroBitPeridoRadio::enable()
   *
   * @return MICROBIT_OK on success, MICROBIT_NOT_SUPPORTED if the BLE stack is running.
   */
-int MicroBitPeridoRadio::disable()
+int TDMACATRadio::disable()
 {
     // Only attempt to enable.disable the radio if the protocol is alreayd running.
     if (ble_running())
@@ -615,18 +647,18 @@ int MicroBitPeridoRadio::disable()
     return MICROBIT_OK;
 }
 
-int MicroBitPeridoRadio::setGroup(uint8_t id)
+int TDMACATRadio::setGroup(uint8_t id)
 {
     return setAppId(id);
 }
 
-int MicroBitPeridoRadio::setAppId(uint16_t id)
+int TDMACATRadio::setAppId(uint16_t id)
 {
     this->appId = id;
     return MICROBIT_OK;
 }
 
-int MicroBitPeridoRadio::getAppId()
+int TDMACATRadio::getAppId()
 {
     return this->appId;
 }
@@ -636,12 +668,12 @@ int MicroBitPeridoRadio::getAppId()
   *
   * @return The number of packets in the receive buffer.
   */
-int MicroBitPeridoRadio::dataReady()
+int TDMACATRadio::dataReady()
 {
     return rxQueueDepth;
 }
 
-PeridoFrameBuffer* MicroBitPeridoRadio::peakRxQueue()
+TDMACATSuperFrame* TDMACATRadio::peakRxQueue()
 {
     if (this->rxTail == this->rxHead)
         return NULL;
@@ -660,14 +692,14 @@ PeridoFrameBuffer* MicroBitPeridoRadio::peakRxQueue()
   * @note Once recv() has been called, it is the callers responsibility to
   *       delete the buffer when appropriate.
   */
-PeridoFrameBuffer* MicroBitPeridoRadio::recv()
+TDMACATSuperFrame* TDMACATRadio::recv()
 {
     if (this->rxTail == this->rxHead)
         return NULL;
 
     uint8_t nextHead = (this->rxHead + 1) % MICROBIT_RADIO_MAXIMUM_RX_BUFFERS;
 
-    PeridoFrameBuffer *p = rxArray[nextHead];
+    TDMACATSuperFrame *p = rxArray[nextHead];
     this->rxArray[nextHead] = NULL;
     this->rxHead = nextHead;
     rxQueueDepth--;
@@ -675,7 +707,7 @@ PeridoFrameBuffer* MicroBitPeridoRadio::recv()
     return p;
 }
 
-void MicroBitPeridoRadio::idleTick()
+void TDMACATRadio::idleTick()
 {
     // if (radio_status & RADIO_STATUS_QUEUE_KEEP_ALIVE)
     // {
@@ -697,7 +729,7 @@ void MicroBitPeridoRadio::idleTick()
     }
 
     // Walk the list of received packets and process each one.
-    PeridoFrameBuffer* p = NULL;
+    TDMACATSuperFrame* p = NULL;
     while ((p = peakRxQueue()) != NULL)
     {
         if (p->namespace_id == cloud.getNamespaceId())
@@ -723,7 +755,7 @@ void MicroBitPeridoRadio::idleTick()
   *
   * @return MICROBIT_OK on success, or MICROBIT_NOT_SUPPORTED if the BLE stack is running.
   */
-int MicroBitPeridoRadio::send(PeridoFrameBuffer* buffer)
+int TDMACATRadio::send(TDMACATSuperFrame* buffer)
 {
     return queueTxBuf(buffer);
 }
@@ -742,19 +774,19 @@ int MicroBitPeridoRadio::send(PeridoFrameBuffer* buffer)
   * @return MICROBIT_OK on success, or MICROBIT_INVALID_PARAMETER if the buffer is invalid,
   *         or the number of bytes to transmit is greater than `MICROBIT_RADIO_MAX_PACKET_SIZE + MICROBIT_RADIO_HEADER_SIZE`.
   */
-int MicroBitPeridoRadio::send(uint8_t *buffer, int len, uint8_t namespaceId)
+int TDMACATRadio::send(uint8_t *buffer, int len, uint8_t namespaceId)
 {
-    if (buffer == NULL || len < 0 || len > MICROBIT_PERIDO_MAX_PACKET_SIZE + MICROBIT_PERIDO_HEADER_SIZE - 1)
+    if (buffer == NULL || len < 0 || len > TDMA_CAT_MAX_PACKET_SIZE + TDMA_CAT_HEADER_SIZE - 1)
         return MICROBIT_INVALID_PARAMETER;
 
-    PeridoFrameBuffer buf;
+    TDMACATSuperFrame buf;
 
     buf.id = microbit_random(65535);
-    buf.length = len + MICROBIT_PERIDO_HEADER_SIZE - 1;
+    buf.length = len + TDMA_CAT_HEADER_SIZE - 1;
     buf.app_id = appId;
     buf.namespace_id = namespaceId;
-    buf.ttl = MICROBIT_PERIDO_DEFAULT_TTL;
-    buf.initial_ttl = MICROBIT_PERIDO_DEFAULT_TTL;
+    buf.ttl = TDMA_CAT_DEFAULT_TTL;
+    buf.initial_ttl = TDMA_CAT_DEFAULT_TTL;
     buf.time_since_wake = 0;
     buf.period = 0;
     memcpy(buf.payload, buffer, len);
@@ -762,7 +794,7 @@ int MicroBitPeridoRadio::send(uint8_t *buffer, int len, uint8_t namespaceId)
     return send(&buf);
 }
 
-uint16_t MicroBitPeridoRadio::generateId(uint8_t app_id, uint8_t namespace_id)
+uint16_t TDMACATRadio::generateId(uint8_t app_id, uint8_t namespace_id)
 {
     uint16_t new_id;
     bool seenBefore = true;
@@ -793,13 +825,13 @@ uint16_t MicroBitPeridoRadio::generateId(uint8_t app_id, uint8_t namespace_id)
     return new_id;
 }
 
-int MicroBitPeridoRadio::setTestRole(TestRole t)
+int TDMACATRadio::setTestRole(TestRole t)
 {
     testRole = t;
     return MICROBIT_OK;
 }
 
-int MicroBitPeridoRadio::sendTestResults(uint8_t* data, uint8_t length)
+int TDMACATRadio::sendTestResults(uint8_t* data, uint8_t length)
 {
     NRF_RADIO->TASKS_DISABLE = 1;
     while(NRF_RADIO->EVENTS_DISABLED == 0);
@@ -807,12 +839,12 @@ int MicroBitPeridoRadio::sendTestResults(uint8_t* data, uint8_t length)
 
     NRF_RADIO->BASE0 =  MICROBIT_RADIO_BASE_ADDRESS;
 
-    PeridoFrameBuffer* buf = new PeridoFrameBuffer;
+    TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
-    memset(buf, 0, sizeof(PeridoFrameBuffer));
+    memset(buf, 0, sizeof(TDMACATSuperFrame));
 
     buf->id = microbit_random(65535);
-    buf->length = length + MICROBIT_PERIDO_HEADER_SIZE - 1;
+    buf->length = length + TDMA_CAT_HEADER_SIZE - 1;
     buf->app_id = 0;
     buf->namespace_id = 0;
     buf->ttl = 0;

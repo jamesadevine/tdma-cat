@@ -2,7 +2,7 @@
 
 // #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_MODIFIED
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "PeridoRadioREST.h"
 #include "MicroBitFiber.h"
 

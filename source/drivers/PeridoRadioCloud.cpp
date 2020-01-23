@@ -1,5 +1,5 @@
 #include "PeridoRadioCloud.h"
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "MicroBitConfig.h"
 #include "MicroBitFiber.h"
 #include "MicroBitSystemTimer.h"
@@ -25,7 +25,7 @@ CloudDataItem::~CloudDataItem()
         delete packet;
 }
 
-PeridoRadioCloud::PeridoRadioCloud(MicroBitPeridoRadio& r, uint8_t namespaceId) : radio(r), rest(*this), variable(*this)
+PeridoRadioCloud::PeridoRadioCloud(TDMACATRadio& r, uint8_t namespaceId) : radio(r), rest(*this), variable(*this)
 {
     this->namespaceId = namespaceId;
     this->txQueue = NULL;
@@ -217,11 +217,11 @@ void PeridoRadioCloud::packetTransmitted(uint16_t id)
 int PeridoRadioCloud::send(uint8_t request_type, uint8_t* buffer, int len)
 {
     CloudDataItem* c = new CloudDataItem;
-    PeridoFrameBuffer* buf = new PeridoFrameBuffer;
+    TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
     // LOG_STRING("SEND");
     buf->id = radio.generateId(radio.getAppId(), 0);
-    buf->length = len + (MICROBIT_PERIDO_HEADER_SIZE - 1) + CLOUD_HEADER_SIZE; // add 1 for request type
+    buf->length = len + (TDMA_CAT_HEADER_SIZE - 1) + CLOUD_HEADER_SIZE; // add 1 for request type
     buf->app_id = radio.getAppId();
     buf->namespace_id = this->namespaceId;
     buf->ttl = 2;
@@ -350,14 +350,14 @@ void PeridoRadioCloud::addToHistory(uint32_t* history, uint8_t* history_index, u
   */
 void PeridoRadioCloud::packetReceived()
 {
-    PeridoFrameBuffer* packet = radio.recv();
+    TDMACATSuperFrame* packet = radio.recv();
     DataPacket* temp = (DataPacket*)packet->payload;
 
     LOG_STRING("PKT_REC:");
     LOG_NUM(temp->request_id);
 
     // LOG_NUM(packet->length);
-    // for (int i = 0; i < packet->length - (MICROBIT_PERIDO_HEADER_SIZE - 1); i++)
+    // for (int i = 0; i < packet->length - (TDMA_CAT_HEADER_SIZE - 1); i++)
     //     LOG_NUM(packet->payload[i]);
 
     // check if we've already received the packet, or if we can't handle a packet (too much network demand)
@@ -445,7 +445,7 @@ DynamicType PeridoRadioCloud::recv(uint16_t id)
     else
     {
         LOG_STRING("recv OK");
-        dt = DynamicType(c->packet->length - (MICROBIT_PERIDO_HEADER_SIZE - 1) - CLOUD_HEADER_SIZE, t->payload, 0);
+        dt = DynamicType(c->packet->length - (TDMA_CAT_HEADER_SIZE - 1) - CLOUD_HEADER_SIZE, t->payload, 0);
     }
 
     delete c;

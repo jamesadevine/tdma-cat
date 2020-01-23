@@ -35,7 +35,7 @@ void PeridoBridge::queueTestResponse()
 {
     LOG_STRING("Q TEST RESP");
     CloudDataItem* cloudData = new CloudDataItem;
-    PeridoFrameBuffer* buf = new PeridoFrameBuffer;
+    TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
     DataPacket* dp = (DataPacket*)&serialPacket.request_id;
     dp->request_type |= REQUEST_STATUS_OK;
@@ -50,7 +50,7 @@ void PeridoBridge::queueTestResponse()
     memcpy(dp->payload, response.getBytes(), response.length());
 
     buf->id = radio.generateId(serialPacket.app_id, serialPacket.namespace_id);
-    buf->length = len + (MICROBIT_PERIDO_HEADER_SIZE - 1);
+    buf->length = len + (TDMA_CAT_HEADER_SIZE - 1);
     buf->app_id = serialPacket.app_id;
     buf->namespace_id = serialPacket.namespace_id;
     buf->ttl = 2;
@@ -146,12 +146,12 @@ void PeridoBridge::onRadioPacket(MicroBitEvent)
 
     while((r = radio.cloud.recvRaw()))
     {
-        PeridoFrameBuffer* packet = r->packet;
+        TDMACATSuperFrame* packet = r->packet;
 
         serialPacket.app_id = packet->app_id;
         serialPacket.namespace_id = packet->namespace_id;
         // first two bytes of the payload nicely contain the id.
-        memcpy(&serialPacket.request_id, packet->payload, packet->length - (MICROBIT_PERIDO_HEADER_SIZE - 1));
+        memcpy(&serialPacket.request_id, packet->payload, packet->length - (TDMA_CAT_HEADER_SIZE - 1));
 
         LOG_STRING("RX PACKET: ");
         LOG_NUM(serialPacket.app_id);
@@ -160,7 +160,7 @@ void PeridoBridge::onRadioPacket(MicroBitEvent)
 
         // uint8_t* packetPtr = (uint8_t *)&serialPacket;
 
-        // for (int i = 0; i < (packet->length - (MICROBIT_PERIDO_HEADER_SIZE - 1)); i++)
+        // for (int i = 0; i < (packet->length - (TDMA_CAT_HEADER_SIZE - 1)); i++)
         // {
         //     serial.printf("%c[%d] ",packet->payload[i],packet->payload[i]);
         // }
@@ -169,7 +169,7 @@ void PeridoBridge::onRadioPacket(MicroBitEvent)
             queueTestResponse();
         else
             // forward the packet over serial
-            sendSerialPacket((packet->length - (MICROBIT_PERIDO_HEADER_SIZE - 1)) + BRIDGE_SERIAL_PACKET_HEADER_SIZE);
+            sendSerialPacket((packet->length - (TDMA_CAT_HEADER_SIZE - 1)) + BRIDGE_SERIAL_PACKET_HEADER_SIZE);
 
         // we are now finished with the packet..
         delete r;
@@ -229,7 +229,7 @@ void PeridoBridge::onSerialPacket(MicroBitEvent)
 
     while ((c = serial.read()) != SLIP_END)
     {
-        if (len >= MICROBIT_PERIDO_MAX_PACKET_SIZE)
+        if (len >= TDMA_CAT_MAX_PACKET_SIZE)
             continue;
 
         if (c == SLIP_ESC)
@@ -267,10 +267,10 @@ void PeridoBridge::onSerialPacket(MicroBitEvent)
     else
     {
         CloudDataItem* cloudData = new CloudDataItem;
-        PeridoFrameBuffer* buf = new PeridoFrameBuffer;
+        TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
         buf->id = radio.generateId(serialPacket.app_id, serialPacket.namespace_id);
-        buf->length = len + (MICROBIT_PERIDO_HEADER_SIZE - 1);
+        buf->length = len + (TDMA_CAT_HEADER_SIZE - 1);
         buf->app_id = serialPacket.app_id;
         buf->namespace_id = serialPacket.namespace_id;
         buf->ttl = 2;
@@ -307,7 +307,7 @@ void PeridoBridge::enable()
     radio.cloud.setBridgeMode(true);
 }
 
-PeridoBridge::PeridoBridge(MicroBitPeridoRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display) : radio(r), serial(s), display(display)
+PeridoBridge::PeridoBridge(TDMACATRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display) : radio(r), serial(s), display(display)
 {
     this->packetCount = 0;
     this->status = 0;

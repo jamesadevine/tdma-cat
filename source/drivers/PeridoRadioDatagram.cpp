@@ -26,7 +26,7 @@ DEALINGS IN THE SOFTWARE.
 #include "MicroBitConfig.h"
 #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "ErrorNo.h"
 #include "MicroBitCompat.h"
 
@@ -50,9 +50,9 @@ DEALINGS IN THE SOFTWARE.
 *
 * @param r The underlying radio module used to send and receive data.
 */
-PeridoRadioDatagram::PeridoRadioDatagram(MicroBitPeridoRadio &r, uint8_t namespaceId) : radio(r)
+PeridoRadioDatagram::PeridoRadioDatagram(TDMACATRadio &r, uint8_t namespaceId) : radio(r)
 {
-    memset(this->rxArray, 0, sizeof(PeridoFrameBuffer*) * PERIDO_RADIO_DATAGRAM_MAX_PACKETS);
+    memset(this->rxArray, 0, sizeof(TDMACATSuperFrame*) * PERIDO_RADIO_DATAGRAM_MAX_PACKETS);
     this->namespaceId = namespaceId;
     this->rxTail = 0;
     this->rxHead = 0;
@@ -77,11 +77,11 @@ int PeridoRadioDatagram::recv(uint8_t *buf, int len)
 
     uint8_t nextHead = (this->rxHead + 1) % PERIDO_RADIO_DATAGRAM_MAX_PACKETS;
 
-    PeridoFrameBuffer *p = rxArray[nextHead];
+    TDMACATSuperFrame *p = rxArray[nextHead];
     this->rxArray[nextHead] = NULL;
     this->rxHead = nextHead;
 
-    int l = min(len, p->length - (MICROBIT_PERIDO_HEADER_SIZE - 1));
+    int l = min(len, p->length - (TDMA_CAT_HEADER_SIZE - 1));
 
     // Fill in the buffer provided, if possible.
     memcpy(buf, p->payload, l);
@@ -105,11 +105,11 @@ PacketBuffer PeridoRadioDatagram::recv()
 
     uint8_t nextHead = (this->rxHead + 1) % PERIDO_RADIO_DATAGRAM_MAX_PACKETS;
 
-    PeridoFrameBuffer *p = rxArray[nextHead];
+    TDMACATSuperFrame *p = rxArray[nextHead];
     this->rxArray[nextHead] = NULL;
     this->rxHead = nextHead;
 
-    PacketBuffer packet(p->payload, p->length - (MICROBIT_PERIDO_HEADER_SIZE - 1), 0);
+    PacketBuffer packet(p->payload, p->length - (TDMA_CAT_HEADER_SIZE - 1), 0);
     delete p;
 
     return packet;
@@ -130,7 +130,7 @@ PacketBuffer PeridoRadioDatagram::recv()
   */
 int PeridoRadioDatagram::send(uint8_t *buffer, int len)
 {
-    if (buffer == NULL || len < 0 || len > MICROBIT_PERIDO_MAX_PACKET_SIZE + MICROBIT_PERIDO_HEADER_SIZE - 1)
+    if (buffer == NULL || len < 0 || len > TDMA_CAT_MAX_PACKET_SIZE + TDMA_CAT_HEADER_SIZE - 1)
         return MICROBIT_INVALID_PARAMETER;
 
     return radio.send(buffer, len, this->namespaceId);
@@ -176,7 +176,7 @@ int PeridoRadioDatagram::send(ManagedString data)
 void PeridoRadioDatagram::packetReceived()
 {
     uint8_t nextTail = (this->rxTail + 1) % PERIDO_RADIO_DATAGRAM_MAX_PACKETS;
-    PeridoFrameBuffer *packet = radio.recv();
+    TDMACATSuperFrame *packet = radio.recv();
 
     // no room
     if (nextTail == this->rxHead)

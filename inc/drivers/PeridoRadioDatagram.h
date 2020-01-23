@@ -28,7 +28,7 @@ DEALINGS IN THE SOFTWARE.
 
 #include "mbed.h"
 #include "MicroBitConfig.h"
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "ManagedString.h"
 
 #define PERIDO_RADIO_DATAGRAM_MAX_PACKETS     6
@@ -47,8 +47,8 @@ DEALINGS IN THE SOFTWARE.
 class PeridoRadioDatagram
 {
     uint8_t namespaceId;
-    MicroBitPeridoRadio   &radio;     // The underlying radio module used to send and receive data.
-    PeridoFrameBuffer*    rxArray[PERIDO_RADIO_DATAGRAM_MAX_PACKETS];   // A linear list of incoming packets, queued awaiting processing.
+    TDMACATRadio   &radio;     // The underlying radio module used to send and receive data.
+    TDMACATSuperFrame*    rxArray[PERIDO_RADIO_DATAGRAM_MAX_PACKETS];   // A linear list of incoming packets, queued awaiting processing.
     uint8_t rxHead;
     uint8_t rxTail;
     public:
@@ -61,7 +61,7 @@ class PeridoRadioDatagram
       *
       * @param r The underlying radio module used to send and receive data.
       */
-    PeridoRadioDatagram(MicroBitPeridoRadio &r, uint8_t namespaceId);
+    PeridoRadioDatagram(TDMACATRadio &r, uint8_t namespaceId);
 
     /**
       * Retrieves packet payload data into the given buffer.

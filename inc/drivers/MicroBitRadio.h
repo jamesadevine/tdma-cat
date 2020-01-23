@@ -30,7 +30,7 @@ DEALINGS IN THE SOFTWARE.
 
 #elif MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 
 #else
 #ifndef MICROBIT_RADIO_H

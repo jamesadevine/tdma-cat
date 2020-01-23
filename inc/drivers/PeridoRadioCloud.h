@@ -2,8 +2,8 @@
 #define PERIDO_RADIO_CLOUD_H
 
 
-struct PeridoFrameBuffer;
-class MicroBitPeridoRadio;
+struct TDMACATSuperFrame;
+class TDMACATRadio;
 
 #include "PeridoRadioREST.h"
 #include "PeridoRadioVariable.h"
@@ -46,7 +46,7 @@ class MicroBitPeridoRadio;
 
 struct CloudDataItem
 {
-    PeridoFrameBuffer* packet;
+    TDMACATSuperFrame* packet;
     uint8_t status;
     uint8_t retry_count;
     uint16_t no_response_count;
@@ -65,7 +65,7 @@ struct DataPacket
 
 class PeridoRadioCloud : public MicroBitComponent
 {
-    MicroBitPeridoRadio& radio;
+    TDMACATRadio& radio;
     uint8_t namespaceId;
 
     CloudDataItem* txQueue;
@@ -86,7 +86,7 @@ class PeridoRadioCloud : public MicroBitComponent
     PeridoRadioREST rest;
     PeridoRadioVariable variable;
 
-    PeridoRadioCloud(MicroBitPeridoRadio& r, uint8_t namespaceId);
+    PeridoRadioCloud(TDMACATRadio& r, uint8_t namespaceId);
 
     int setBridgeMode(bool state);
     bool getBridgeMode();

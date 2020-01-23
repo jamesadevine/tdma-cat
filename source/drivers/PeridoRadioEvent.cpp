@@ -26,7 +26,7 @@ DEALINGS IN THE SOFTWARE.
 #include "MicroBitConfig.h"
 
 #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 
 /**
  * Provides a simple broadcast radio abstraction, built upon the raw nrf51822 RADIO module.
@@ -50,7 +50,7 @@ DEALINGS IN THE SOFTWARE.
   *
   * @param r The underlying radio module used to send and receive data.
   */
-PeridoRadioEvent::PeridoRadioEvent(MicroBitPeridoRadio &r, uint8_t namespaceId) : radio(r)
+PeridoRadioEvent::PeridoRadioEvent(TDMACATRadio &r, uint8_t namespaceId) : radio(r)
 {
     this->namespaceId = namespaceId;
     this->suppressForwarding = false;
@@ -146,7 +146,7 @@ int PeridoRadioEvent::ignore(uint16_t id, uint16_t value, EventModel &eventBus)
   */
 void PeridoRadioEvent::packetReceived()
 {
-    PeridoFrameBuffer *p = radio.recv();
+    TDMACATSuperFrame *p = radio.recv();
     MicroBitEvent *e = (MicroBitEvent *) p->payload;
 
     suppressForwarding = true;

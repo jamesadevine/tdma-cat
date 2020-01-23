@@ -1,5 +1,5 @@
-#ifndef MICROBIT_PERIDO_RADIO_TIMER_H
-#define MICROBIT_PERIDO_RADIO_TIMER_H
+#ifndef TDMA_CAT_RADIO_TIMER_H
+#define TDMA_CAT_RADIO_TIMER_H
 
 #include "MicroBitConfig.h"
 #include "MicroBitComponent.h"

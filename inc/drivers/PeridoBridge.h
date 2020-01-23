@@ -1,7 +1,7 @@
 #ifndef PERIDO_BRIDGE_H
 #define PERIDO_BRIDGE_H
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "MicroBitSerial.h"
 #include "MicroBitMessageBus.h"
 #include "MicroBitDisplay.h"
@@ -24,12 +24,12 @@ struct PeridoBridgeSerialPacket
     uint8_t namespace_id;
     uint16_t request_id;
 
-    uint8_t payload[MICROBIT_PERIDO_MAX_PACKET_SIZE];
+    uint8_t payload[TDMA_CAT_MAX_PACKET_SIZE];
 }__attribute((packed));
 
 class PeridoBridge : public MicroBitComponent
 {
-    MicroBitPeridoRadio& radio;
+    TDMACATRadio& radio;
     MicroBitSerial& serial;
     MicroBitDisplay& display;
 
@@ -46,7 +46,7 @@ class PeridoBridge : public MicroBitComponent
 
     public:
 
-    PeridoBridge(MicroBitPeridoRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display);
+    PeridoBridge(TDMACATRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display);
 
     void enable();
 };

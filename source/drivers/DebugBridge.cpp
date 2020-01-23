@@ -21,7 +21,7 @@ void DebugBridge::onRadioPacket(MicroBitEvent)
 
     while((r = radio.cloud.recvRaw()))
     {
-        PeridoFrameBuffer* packet = r->packet;
+        TDMACATSuperFrame* packet = r->packet;
         DataPacket* dp = (DataPacket*)packet->payload;
         if (dp->request_type & REQUEST_STATUS_ERROR || dp->request_type & REQUEST_STATUS_OK)
             serial.printf("RESP: aid: %d nsid: %d rid: %d time: %d\r\n", packet->app_id, packet->namespace_id, dp->request_id, (int)system_timer_current_time());
@@ -37,7 +37,7 @@ void DebugBridge::enable()
     radio.cloud.setBridgeMode(true);
 }
 
-DebugBridge::DebugBridge(MicroBitPeridoRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display) : radio(r), serial(s), display(display)
+DebugBridge::DebugBridge(TDMACATRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display) : radio(r), serial(s), display(display)
 {
     this->packetCount = 0;
     this->status = 0;

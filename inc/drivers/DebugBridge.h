@@ -1,7 +1,7 @@
 #ifndef DEBUG_BRIDGE_H
 #define DEBUG_BRIDGE_H
 
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "MicroBitSerial.h"
 #include "MicroBitMessageBus.h"
 #include "MicroBitDisplay.h"
@@ -11,7 +11,7 @@
 
 class DebugBridge : public MicroBitComponent
 {
-    MicroBitPeridoRadio& radio;
+    TDMACATRadio& radio;
     MicroBitSerial& serial;
     MicroBitDisplay& display;
 
@@ -21,7 +21,7 @@ class DebugBridge : public MicroBitComponent
 
     public:
 
-    DebugBridge(MicroBitPeridoRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display);
+    DebugBridge(TDMACATRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display);
 
     void enable();
 };

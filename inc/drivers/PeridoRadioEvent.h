@@ -28,7 +28,7 @@ DEALINGS IN THE SOFTWARE.
 
 #include "mbed.h"
 #include "MicroBitConfig.h"
-#include "MicroBitPeridoRadio.h"
+#include "TDMACATRadio.h"
 #include "EventModel.h"
 
 /**
@@ -48,7 +48,7 @@ class PeridoRadioEvent
 {
     uint8_t namespaceId;
     bool                  suppressForwarding;     // A private flag used to prevent event forwarding loops.
-    MicroBitPeridoRadio   &radio;                 // A reference to the underlying radio module to use.
+    TDMACATRadio   &radio;                 // A reference to the underlying radio module to use.
 
     public:
 
@@ -60,7 +60,7 @@ class PeridoRadioEvent
       *
       * @param r The underlying radio module used to send and receive data.
       */
-    PeridoRadioEvent(MicroBitPeridoRadio &r, uint8_t namespaceId);
+    PeridoRadioEvent(TDMACATRadio &r, uint8_t namespaceId);
 
     /**
       * Associates the given event with the radio channel.

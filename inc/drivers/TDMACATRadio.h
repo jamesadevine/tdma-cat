@@ -23,11 +23,11 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
-#ifndef MICROBIT_PERIDO_RADIO_H
-#define MICROBIT_PERIDO_RADIO_H
+#ifndef TDMA_CAT_RADIO_H
+#define TDMA_CAT_RADIO_H
 
-class MicroBitPeridoRadio;
-struct PeridoFrameBuffer;
+class TDMACATRadio;
+struct TDMACATSuperFrame;
 
 #include "mbed.h"
 #include "MicroBitConfig.h"
@@ -63,47 +63,47 @@ struct PeridoFrameBuffer;
  * For serious applications, BLE should be considered a substantially more secure alternative.
  */
 
-#define MICROBIT_PERIDO_TEST_MODE               1
+#define TDMA_CAT_TEST_MODE               1
 
 // in test mode, we only transmit one packet
-#if MICROBIT_PERIDO_TEST_MODE == 1
-    #define MICROBIT_PERIDO_DEFAULT_TTL             1
+#if TDMA_CAT_TEST_MODE == 1
+    #define TDMA_CAT_DEFAULT_TTL             1
 #else
-    #define MICROBIT_PERIDO_DEFAULT_TTL             2
+    #define TDMA_CAT_DEFAULT_TTL             2
 #endif
 
 #define MICROBIT_RADIO_STATUS_INITIALISED       0x0001
 #define MICROBIT_RADIO_DEFAULT_TX_POWER         6
 #define MICROBIT_RADIO_DEFAULT_FREQUENCY        7
 #define MICROBIT_RADIO_BASE_ADDRESS             0x75626974
-#define MICROBIT_PERIDO_RADIO_BASE_ADDRESS      0x75626975
+#define TDMA_CAT_RADIO_BASE_ADDRESS      0x75626975
 
 // Default configuration values
-#define MICROBIT_PERIDO_HEADER_SIZE             10
-#define MICROBIT_PERIDO_DEFAULT_SLEEP           600
+#define TDMA_CAT_HEADER_SIZE             10
+#define TDMA_CAT_DEFAULT_SLEEP           600
 
-#define MICROBIT_PERIDO_MAX_PACKET_SIZE         100
+#define TDMA_CAT_MAX_PACKET_SIZE         100
 
 #ifndef MICROBIT_RADIO_MAXIMUM_RX_BUFFERS
 #define MICROBIT_RADIO_MAXIMUM_RX_BUFFERS       10
 #endif
 
-#ifndef MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS
-#define MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS      20
+#ifndef TDMA_CAT_MAXIMUM_TX_BUFFERS
+#define TDMA_CAT_MAXIMUM_TX_BUFFERS      20
 #endif
 
-#define MICROBIT_PERIDO_DEFAULT_APP_ID          0
+#define TDMA_CAT_DEFAULT_APP_ID          0
 
-#define MICROBIT_PERIDO_CLOUD_NAMESPACE         1
-#define MICROBIT_PERIDO_DATAGRAM_NAMESPACE      2
-#define MICROBIT_PERIDO_EVENT_NAMESPACE         3
+#define TDMA_CAT_CLOUD_NAMESPACE         1
+#define TDMA_CAT_DATAGRAM_NAMESPACE      2
+#define TDMA_CAT_EVENT_NAMESPACE         3
 
-#define MICROBIT_PERIDO_FRAME_PROPOSAL_FLAG     0x01
-#define MICROBIT_PERIDO_FRAME_KEEP_ALIVE_FLAG     0x02
+#define TDMA_CAT_FRAME_PROPOSAL_FLAG     0x01
+#define TDMA_CAT_FRAME_KEEP_ALIVE_FLAG     0x02
 
-#define MICROBIT_RADIO_EVT_DATAGRAM             1       // Event to signal that a new datagram has been received. COMPATIBILITY!
+#define MICROBIT_RADIO_EVT_DATAGRAM             1
 
-struct PeridoFrameBuffer
+struct TDMACATSuperFrame
 {
     uint8_t             length;                             // The length of the remaining bytes in the packet.
     uint8_t             app_id;
@@ -111,11 +111,11 @@ struct PeridoFrameBuffer
     uint16_t            id;
     uint8_t             ttl:4, initial_ttl:4;
     uint32_t            time_since_wake:24, period:4, flags:4;
-    uint8_t             payload[MICROBIT_PERIDO_MAX_PACKET_SIZE];    // User / higher layer protocol data
+    uint8_t             payload[TDMA_CAT_MAX_PACKET_SIZE];    // User / higher layer protocol data
 } __attribute__((packed));
 
 
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
 
 enum TestRole {
   Transmitter,
@@ -126,7 +126,7 @@ enum TestRole {
 
 #endif
 
-class MicroBitPeridoRadio : public MicroBitComponent
+class TDMACATRadio : public MicroBitComponent
 {
     public:
     uint8_t                 appId;
@@ -139,31 +139,31 @@ class MicroBitPeridoRadio : public MicroBitComponent
     PeridoRadioEvent        event;          // A simple event handling service.
 
     // a fifo array of received packets
-    // the array can hold a maximum of MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS - 1 packets
-    PeridoFrameBuffer       *rxArray[MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS];
+    // the array can hold a maximum of TDMA_CAT_MAXIMUM_TX_BUFFERS - 1 packets
+    TDMACATSuperFrame       *rxArray[TDMA_CAT_MAXIMUM_TX_BUFFERS];
     uint8_t                 rxHead; // head points to the first rx'd packet-1
     uint8_t                 rxTail; // tail points to the last rx'd packet
 
     // a fifo array of transmitted packets
-    // the array can hold a maximum of MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS - 1 packets
-    PeridoFrameBuffer       *txArray[MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS];
+    // the array can hold a maximum of TDMA_CAT_MAXIMUM_TX_BUFFERS - 1 packets
+    TDMACATSuperFrame       *txArray[TDMA_CAT_MAXIMUM_TX_BUFFERS];
     uint8_t                 txHead; // head points to the first packet to be tx'd
     uint8_t                 txTail; // head points to the last packet to be tx'd
 
     // this member variable is allocated and used whenever a packet is received. The received packet is then copied into the rxArray
-    PeridoFrameBuffer       *rxBuf;
+    TDMACATSuperFrame       *rxBuf;
 
-    static MicroBitPeridoRadio    *instance;  // A singleton reference, used purely by the interrupt service routine.
+    static TDMACATRadio    *instance;  // A singleton reference, used purely by the interrupt service routine.
 
     /**
       * Constructor.
       *
-      * Initialise the MicroBitPeridoRadio.
+      * Initialise the TDMACATRadio.
       *
       * @note This class is demand activated, as a result most resources are only
       *       committed if send/recv or event registrations calls are made.
       */
-    MicroBitPeridoRadio(LowLevelTimer& timer, uint8_t appId = MICROBIT_PERIDO_DEFAULT_APP_ID, uint16_t id = MICROBIT_ID_RADIO);
+    TDMACATRadio(LowLevelTimer& timer, uint8_t appId = TDMA_CAT_DEFAULT_APP_ID, uint16_t id = MICROBIT_ID_RADIO);
 
     /**
       * Change the output power level of the transmitter to the given value.
@@ -190,11 +190,11 @@ class MicroBitPeridoRadio : public MicroBitComponent
       *
       * @return a pointer to the current receive buffer.
       */
-    PeridoFrameBuffer * getRxBuf();
+    TDMACATSuperFrame * getRxBuf();
 
     int popTxQueue();
 
-    PeridoFrameBuffer* getTxBuf();
+    TDMACATSuperFrame* getTxBuf();
 
     /**
       * Attempt to queue a buffer received by the radio hardware, if sufficient space is available.
@@ -204,9 +204,9 @@ class MicroBitPeridoRadio : public MicroBitComponent
       */
     int copyRxBuf();
 
-    int queueTxBuf(PeridoFrameBuffer* tx);
+    int queueTxBuf(TDMACATSuperFrame* tx);
 
-    PeridoFrameBuffer* getCurrentTxBuf();
+    TDMACATSuperFrame* getCurrentTxBuf();
 
     int queueKeepAlive();
 
@@ -250,9 +250,9 @@ class MicroBitPeridoRadio : public MicroBitComponent
       * @note Once recv() has been called, it is the callers responsibility to
       *       delete the buffer when appropriate.
       */
-    PeridoFrameBuffer* recv();
+    TDMACATSuperFrame* recv();
 
-    PeridoFrameBuffer* peakRxQueue();
+    TDMACATSuperFrame* peakRxQueue();
 
     void idleTick();
 
@@ -268,7 +268,7 @@ class MicroBitPeridoRadio : public MicroBitComponent
       *
       * @return MICROBIT_OK on success, or MICROBIT_NOT_SUPPORTED if the BLE stack is running.
       */
-    int send(PeridoFrameBuffer* buffer);
+    int send(TDMACATSuperFrame* buffer);
 
     int send(uint8_t *buffer, int len, uint8_t namespaceId);
 
@@ -277,7 +277,7 @@ class MicroBitPeridoRadio : public MicroBitComponent
      **/
     uint16_t generateId(uint8_t app_id, uint8_t namespace_id);
 
-#if MICROBIT_PERIDO_TEST_MODE == 1
+#if TDMA_CAT_TEST_MODE == 1
     int setTestRole(TestRole t);
 
     int sendTestResults(uint8_t* data, uint8_t length);
