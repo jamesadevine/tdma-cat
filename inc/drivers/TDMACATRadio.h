@@ -63,54 +63,59 @@ struct TDMACATSuperFrame;
  * For serious applications, BLE should be considered a substantially more secure alternative.
  */
 
-#define TDMA_CAT_TEST_MODE               1
+#define TDMA_CAT_TEST_MODE                  0
 
 // in test mode, we only transmit one packet
 #if TDMA_CAT_TEST_MODE == 1
-    #define TDMA_CAT_DEFAULT_TTL             1
+    #define TDMA_CAT_DEFAULT_TTL            1
 #else
-    #define TDMA_CAT_DEFAULT_TTL             2
+    #define TDMA_CAT_DEFAULT_TTL            2
 #endif
 
-#define MICROBIT_RADIO_STATUS_INITIALISED       0x0001
-#define MICROBIT_RADIO_DEFAULT_TX_POWER         6
-#define MICROBIT_RADIO_DEFAULT_FREQUENCY        7
-#define MICROBIT_RADIO_BASE_ADDRESS             0x75626974
-#define TDMA_CAT_RADIO_BASE_ADDRESS      0x75626975
+#define MICROBIT_RADIO_STATUS_INITIALISED   0x0001
+#define MICROBIT_RADIO_DEFAULT_TX_POWER     6
+#define MICROBIT_RADIO_DEFAULT_FREQUENCY    7
+#define MICROBIT_RADIO_BASE_ADDRESS         0x75626974
+#define TDMA_CAT_RADIO_BASE_ADDRESS         0x75626975
 
 // Default configuration values
-#define TDMA_CAT_HEADER_SIZE             10
-#define TDMA_CAT_DEFAULT_SLEEP           600
+#define TDMA_CAT_HEADER_SIZE                12
 
-#define TDMA_CAT_MAX_PACKET_SIZE         100
+#define TDMA_CAT_MAX_PACKET_SIZE            100
+
+#define TDMA_CAT_BUFFER_POOL_SIZE           20
+// add one for the empty slot
+#define TDMA_CAT_QUEUE_SIZE                 ((TDMA_CAT_BUFFER_POOL_SIZE / 2) + 1)
 
 #ifndef MICROBIT_RADIO_MAXIMUM_RX_BUFFERS
-#define MICROBIT_RADIO_MAXIMUM_RX_BUFFERS       10
+#define MICROBIT_RADIO_MAXIMUM_RX_BUFFERS   10
 #endif
 
 #ifndef TDMA_CAT_MAXIMUM_TX_BUFFERS
-#define TDMA_CAT_MAXIMUM_TX_BUFFERS      20
+#define TDMA_CAT_MAXIMUM_TX_BUFFERS         20
 #endif
 
-#define TDMA_CAT_DEFAULT_APP_ID          0
+#define TDMA_CAT_DEFAULT_APP_ID             0
 
-#define TDMA_CAT_CLOUD_NAMESPACE         1
-#define TDMA_CAT_DATAGRAM_NAMESPACE      2
-#define TDMA_CAT_EVENT_NAMESPACE         3
+#define TDMA_CAT_CLOUD_NAMESPACE            1
+#define TDMA_CAT_DATAGRAM_NAMESPACE         2
+#define TDMA_CAT_EVENT_NAMESPACE            3
 
-#define TDMA_CAT_FRAME_PROPOSAL_FLAG     0x01
-#define TDMA_CAT_FRAME_KEEP_ALIVE_FLAG     0x02
+#define TDMA_CAT_FRAME_PROPOSAL_FLAG        0x01
+#define TDMA_CAT_FRAME_KEEP_ALIVE_FLAG      0x02
 
 #define MICROBIT_RADIO_EVT_DATAGRAM             1
+
+#define TMDMA_CAT_FRAME_FLAGS_ADVERT        0x01
+#define TMDMA_CAT_FRAME_FLAGS_DONE          0x02
 
 struct TDMACATSuperFrame
 {
     uint8_t             length;                             // The length of the remaining bytes in the packet.
-    uint8_t             app_id;
-    uint8_t             namespace_id;
-    uint16_t            id;
+    uint8_t             slot_id;
+    uint8_t             flags;
     uint8_t             ttl:4, initial_ttl:4;
-    uint32_t            time_since_wake:24, period:4, flags:4;
+    uint64_t            device_id;
     uint8_t             payload[TDMA_CAT_MAX_PACKET_SIZE];    // User / higher layer protocol data
 } __attribute__((packed));
 
@@ -128,10 +133,14 @@ enum TestRole {
 
 class TDMACATRadio : public MicroBitComponent
 {
+
+    void addBufferToPool(TDMACATSuperFrame* q);
+    TDMACATSuperFrame* getBufferFromPool();
+    int addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, int* tail, int* head);
+    TDMACATSuperFrame* getBufferFromQueue(TDMACATSuperFrame** q, int* tail, int* head);
+    int queueTxFrame(TDMACATSuperFrame* s);
+
     public:
-    uint8_t                 appId;
-    uint8_t                 rxQueueDepth; // The number of packets in the receiver queue.
-    uint8_t                 txQueueDepth; // The number of packets in the tx queue.
 
     LowLevelTimer&          timer;
     PeridoRadioCloud        cloud;          // A simple REST handling service.
@@ -139,19 +148,20 @@ class TDMACATRadio : public MicroBitComponent
     PeridoRadioEvent        event;          // A simple event handling service.
 
     // a fifo array of received packets
-    // the array can hold a maximum of TDMA_CAT_MAXIMUM_TX_BUFFERS - 1 packets
-    TDMACATSuperFrame       *rxArray[TDMA_CAT_MAXIMUM_TX_BUFFERS];
-    uint8_t                 rxHead; // head points to the first rx'd packet-1
-    uint8_t                 rxTail; // tail points to the last rx'd packet
+    // the array can hold a maximum of TDMA_CAT_QUEUE_SIZE - 1 packets
+    TDMACATSuperFrame       *rxArray[TDMA_CAT_QUEUE_SIZE];
+    uint8_t                 rxHead; // head points to the last rx'd packet-1
+    uint8_t                 rxTail; // tail points to the first rx'd packet
 
     // a fifo array of transmitted packets
-    // the array can hold a maximum of TDMA_CAT_MAXIMUM_TX_BUFFERS - 1 packets
-    TDMACATSuperFrame       *txArray[TDMA_CAT_MAXIMUM_TX_BUFFERS];
-    uint8_t                 txHead; // head points to the first packet to be tx'd
-    uint8_t                 txTail; // head points to the last packet to be tx'd
+    // the array can hold a maximum of TDMA_CAT_QUEUE_SIZE - 1 packets
+    TDMACATSuperFrame       *txArray[TDMA_CAT_QUEUE_SIZE];
+    uint8_t                 txHead; // head points to the last packet to be tx'd
+    uint8_t                 txTail; // head points to the first packet to be tx'd
 
-    // this member variable is allocated and used whenever a packet is received. The received packet is then copied into the rxArray
-    TDMACATSuperFrame       *rxBuf;
+    TDMACATSuperFrame       *bufferPool[TDMA_CAT_BUFFER_POOL_SIZE];
+
+    TDMACATSuperFrame       *currentBuffer;
 
     static TDMACATRadio    *instance;  // A singleton reference, used purely by the interrupt service routine.
 

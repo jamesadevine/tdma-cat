@@ -6,10 +6,12 @@
 #define TDMA_CAT_WINDOW_SIZE_MS         1000
 #define TDMA_CAT_SLOT_COUNT             4
 #define TDMA_CAT_SLOT_SIZE_MS           (TDMA_CAT_WINDOW_SIZE_MS/TDMA_CAT_SLOT_COUNT)
+#define TDMA_CAT_SLOT_SIZE_US           (TDMA_CAT_SLOT_SIZE_MS * 1000)
 #define TDMA_CAT_TABLE_SIZE             TDMA_CAT_SLOT_COUNT
 #define TDMA_CAT_DEFAULT_EXPIRATION     5
 #define TDMA_CAT_DEFAULT_TTL            6
 #define TDMA_CAT_ADVERTISEMENT_SLOT     0
+#define TDMA_CAT_UNITIALISED_SLOT       -1
 
 struct TDMA_CAT_Slot {
     uint64_t device_identifier;
@@ -28,7 +30,13 @@ int tdma_init(uint64_t device_identifier);
 
 int tdma_set_slot(TDMA_CAT_Slot slot);
 
-int tdma_synchronise(uint32_t slot_identifier);
+int tdma_synchronise(TDMA_CAT_Slot slot);
+
+int tdma_is_synchronised();
+
+int tdma_is_advertising_slot();
+
+int tdma_advert_required();
 
 int tdma_advance_slot();
 

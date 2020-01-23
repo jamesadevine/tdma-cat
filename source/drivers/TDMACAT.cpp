@@ -2,7 +2,7 @@
 #include "ErrorNo.h"
 
 static TDMA_CAT_Slot table[TDMA_CAT_TABLE_SIZE];
-static int current_slot = TDMA_CAT_ADVERTISEMENT_SLOT;
+static int current_slot = TDMA_CAT_UNITIALISED_SLOT;
 
 int tdma_init(uint64_t device_identifier)
 {
@@ -17,8 +17,6 @@ int tdma_init(uint64_t device_identifier)
     adv.flags = 0;
 
     table[TDMA_CAT_ADVERTISEMENT_SLOT] = adv;
-
-
 }
 
 int tdma_set_slot(TDMA_CAT_Slot slot)
@@ -41,16 +39,19 @@ TDMA_CAT_Slot tdma_get_slot(uint32_t slot_identifier)
 
 TDMA_CAT_Slot tdma_get_current_slot()
 {
+    TDMA_CAT_Slot blank;
+    blank.expiration = 255;
+
+    if (current_slot == TDMA_CAT_UNITIALISED_SLOT)
+        return blank;
+
     return table[current_slot];
 }
 
-int tdma_synchronise(uint32_t slot_identifier)
+int tdma_synchronise(TDMA_CAT_Slot slot)
 {
-    if (current_slot > TDMA_CAT_TABLE_SIZE - 1)
-        return MICROBIT_NO_RESOURCES;
-
-    current_slot = slot_identifier;
-    return MICROBIT_OK;
+    current_slot = slot.slot_identifier;
+    return tdma_set_slot(slot);
 }
 
 /**
@@ -60,6 +61,25 @@ int tdma_advance_slot()
 {
     current_slot = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
     return (table[current_slot].ttl == 0) ? 1 : 0;
+}
+
+int tdma_is_synchronised()
+{
+    return current_slot != TDMA_CAT_UNITIALISED_SLOT;
+}
+
+int tdma_is_advertising_slot()
+{
+    return current_slot == TDMA_CAT_ADVERTISEMENT_SLOT;
+}
+
+int tdma_advert_required()
+{
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+        if (table[i].ttl ==  0 && !(table[i].flags & TDMA_SLOT_FLAGS_ADVERTISED))
+            return 1;
+
+    return 0;
 }
 
 /**
