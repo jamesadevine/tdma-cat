@@ -40,7 +40,9 @@ int PeridoRadioCloud::setBridgeMode(bool state)
     if (state)
     {
         this->status |= RADIO_CLOUD_STATUS_HUB_MODE;
+#if IGNORE_FUTURE_PROBLEMS == 0
         radio.setAppId(0);
+#endif
     }
     else
         this->status &= ~RADIO_CLOUD_STATUS_HUB_MODE;
@@ -119,7 +121,7 @@ CloudDataItem* PeridoRadioCloud::peakQueuePacketId(CloudDataItem** queue, uint16
 
     LOG_STRING("search:");
     LOG_NUM(id);
-
+#if IGNORE_FUTURE_PROBLEMS == 0
     while (p != NULL)
     {
         // LOG_STRING("ITER");
@@ -132,6 +134,7 @@ CloudDataItem* PeridoRadioCloud::peakQueuePacketId(CloudDataItem** queue, uint16
 
         p = p->next;
     }
+#endif
     LOG_STRING("NOT FOUND");
     return NULL;
 }
@@ -220,6 +223,7 @@ int PeridoRadioCloud::send(uint8_t request_type, uint8_t* buffer, int len)
     TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
     // LOG_STRING("SEND");
+#if IGNORE_FUTURE_PROBLEMS == 0
     buf->id = radio.generateId(radio.getAppId(), 0);
     buf->length = len + (TDMA_CAT_HEADER_SIZE - 1) + CLOUD_HEADER_SIZE; // add 1 for request type
     buf->app_id = radio.getAppId();
@@ -228,6 +232,7 @@ int PeridoRadioCloud::send(uint8_t request_type, uint8_t* buffer, int len)
     buf->initial_ttl = 2;
     buf->time_since_wake = 0;
     buf->period = 0;
+#endif
 
     DataPacket* data = (DataPacket*)buf->payload;
     data->request_id = generateId(); //  try to go for uniqueness within the driver.
@@ -356,6 +361,7 @@ void PeridoRadioCloud::packetReceived()
     LOG_STRING("PKT_REC:");
     LOG_NUM(temp->request_id);
 
+#if IGNORE_FUTURE_PROBLEMS == 0
     // LOG_NUM(packet->length);
     // for (int i = 0; i < packet->length - (TDMA_CAT_HEADER_SIZE - 1); i++)
     //     LOG_NUM(packet->payload[i]);
@@ -372,6 +378,7 @@ void PeridoRadioCloud::packetReceived()
 
     addToHistory(rx_history, &rx_history_index, temp->request_id, packet->app_id, packet->namespace_id);
     LOG_STRING("ADDING to RX HIST");
+#endif
 
     // we have received a response, remove any matching packets from the txQueue
     CloudDataItem* p = removeFromQueue(&txQueue, temp->request_id);

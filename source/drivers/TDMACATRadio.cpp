@@ -28,6 +28,7 @@ DEALINGS IN THE SOFTWARE.
 #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
 
 #include "TDMACATRadio.h"
+#include "TDMACAT.h"
 #include "MicroBitComponent.h"
 #include "EventModel.h"
 #include "MicroBitDevice.h"
@@ -35,6 +36,7 @@ DEALINGS IN THE SOFTWARE.
 #include "MicroBitFiber.h"
 #include "MicroBitBLEManager.h"
 #include "MicroBitHeapAllocator.h"
+#include "nrf.h"
 
 TDMACATRadio* TDMACATRadio::instance = NULL;
 
@@ -61,6 +63,10 @@ volatile uint32_t tx_packets[TX_PACKETS_SIZE] = { 0 };
   **/
 #define TDMA_CAT_ASSERT 1
 
+#if TDMA_CAT_TEST_MODE == 1
+    TestRole testRole;
+#endif
+
 // 20 [txen][CC0], 21[rxen][CC0], 22[dis][CC1], 27[END][CC2]
 #define PPI_CHAN_TX_EN      20
 #define PPI_CHAN_RX_EN      21
@@ -86,14 +92,12 @@ volatile uint32_t tx_packets[TX_PACKETS_SIZE] = { 0 };
 volatile uint8_t radioState = RADIO_STATE_RECEIVE;
 volatile uint8_t tdmaState = TDMA_STATE_EXPLORER;
 
-TestRole testRole;
-
 inline void TIMER_SET_CC(uint8_t channel, int value)
 {
     NRF_TIMER0->CC[channel] = value;
 }
 
-inline void TIMER_GET_CC(uint8_t channel)
+inline uint32_t TIMER_GET_CC(uint8_t channel)
 {
     return NRF_TIMER0->CC[channel];
 }
@@ -156,7 +160,7 @@ inline void TRACK_FRAME(uint16_t frame_id)
     {
         if (frame_tracker[i] == 0)
         {
-            frame_tracker[i] = frame_id
+            frame_tracker[i] = frame_id;
             return;
         }
     }
@@ -166,7 +170,7 @@ inline void SYNC_TO_FRAME(int ttl, int initial_ttl, int packet_size)
 {
     uint32_t t = TIMER_GET_CC(TIMER_CC_TIMESTAMP);
     uint8_t hops = initial_ttl - ttl;
-    uint32_t time_to_arrive = (hops * ((p->length * TIME_TO_TRANSMIT_BYTE_1MB) + RX_TX_DISABLE_TIME + TX_ENABLE_TIME));
+    uint32_t time_to_arrive = (hops * ((packet_size * TIME_TO_TRANSMIT_BYTE_1MB) + RX_TX_DISABLE_TIME + TX_ENABLE_TIME));
     TIMER_SET_CC_IRQ(TIMER_CC_TDMA, t + ((TDMA_CAT_SLOT_SIZE_US - time_to_arrive) - 2000));
 }
 
@@ -176,14 +180,18 @@ void timer_callback(uint8_t)
     TIMER_CLEAR();
     TIMER_START();
 
-    memset(frame_tracker, 0, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
+    memset((void*)frame_tracker, 0, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
 
     int owner = 1;
 
     if (tdma_is_synchronised())
         owner = tdma_advance_slot();
     else
-        tdma_synchronise(TDMA_CAT_ADVERTISEMENT_SLOT);
+    {
+        TDMA_CAT_Slot slot;
+        slot.slot_identifier = TDMA_CAT_ADVERTISEMENT_SLOT;
+        tdma_synchronise(slot);
+    }
 
     if (owner)
     {
@@ -193,7 +201,7 @@ void timer_callback(uint8_t)
             if (tdma_advert_required())
             {
                 // send with random back off
-                tdma_populate_advert(uint8_t buff, uint16_t max size);
+                // tdma_populate_advert(uint8_t buff, uint16_t max size);
                 // TODO: work out how to compose frames and send in future....?
                 tdmaState = TDMA_STATE_OWNER;
                 radioState = RADIO_STATE_TRANSMIT;
@@ -201,9 +209,9 @@ void timer_callback(uint8_t)
                 TIMER_SET_CC(TIMER_CC_TX_RX, 2000 + microbit_random(TDMA_CAT_SLOT_SIZE_US));
                 TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 
-                PPI_ENABLE_CHAN(PPI_CHAN_TX);
+                PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
                 PPI_ENABLE_CHAN(PPI_CHAN_END);
-                PPI_DISABLE_CHAN(PPI_CHAN_RX);
+                PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
             }
             else
             {
@@ -214,9 +222,9 @@ void timer_callback(uint8_t)
                 TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
                 TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 
-                PPI_ENABLE_CHAN(PPI_CHAN_RX);
+                PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
                 PPI_ENABLE_CHAN(PPI_CHAN_END);
-                PPI_DISABLE_CHAN(PPI_CHAN_TX);
+                PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
             }
         }
         else
@@ -224,16 +232,16 @@ void timer_callback(uint8_t)
             tdmaState = TDMA_STATE_OWNER;
             radioState = RADIO_STATE_TRANSMIT;
 
-            populate_frame();
+            // populate_frame();
 
             TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
             TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 
             // TODO: work out how to compose frames and send in future....?
 
-            PPI_ENABLE_CHAN(PPI_CHAN_TX);
+            PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
             PPI_ENABLE_CHAN(PPI_CHAN_END);
-            PPI_DISABLE_CHAN(PPI_CHAN_RX);
+            PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
         }
     }
     else
@@ -244,9 +252,9 @@ void timer_callback(uint8_t)
         TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
         TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 
-        PPI_ENABLE_CHAN(PPI_CHAN_RX);
+        PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
         PPI_ENABLE_CHAN(PPI_CHAN_END);
-        PPI_DISABLE_CHAN(PPI_CHAN_TX);
+        PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
     }
 }
 
@@ -267,13 +275,13 @@ volatile int hw_state = 0;
 extern "C" void RADIO_IRQHandler(void)
 {
     NRF_RADIO->EVENTS_END = 0;
-    TDMACATSuperFrame *p = TDMACATRadio::instance->rxBuf;
+    TDMACATSuperFrame *p = TDMACATRadio::instance->currentBuffer;
 
     if (radioState == RADIO_STATE_FORWARD)
     {
         radioState = RADIO_STATE_RECEIVE;
         memset(p, 0, sizeof(TDMACATSuperFrame));
-        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
+        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->currentBuffer;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
 #if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
@@ -313,7 +321,7 @@ extern "C" void RADIO_IRQHandler(void)
             {
                 // track it to prevent duplication.
                 TRACK_FRAME(p->frame_id);
-                SYNC_TO_FRAME();
+                SYNC_TO_FRAME(p->ttl, p->initial_ttl, p->length);
 
                 TDMA_CAT_Slot slot;
                 slot.device_identifier = p->device_id;
@@ -322,7 +330,7 @@ extern "C" void RADIO_IRQHandler(void)
                 slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
                 slot.flags = 0;
 
-                tdma_synchronise(slot);
+                tdma_set_slot(slot);
 
                 // how do we handle advertising slots?
 
@@ -349,7 +357,7 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_TRANSMIT)
     {
         radioState = RADIO_STATE_RECEIVE;
-        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
+        NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->currentBuffer;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
 #if TDMA_CAT_TEST_MODE == 1
         HW_ASSERT(0,0);
@@ -390,15 +398,14 @@ void manual_poke(TDMACATSuperFrame* p)
   * @note This class is demand activated, as a result most resources are only
   *       committed if send/recv or event registrations calls are made.
   */
-TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint8_t appId, uint16_t id) : timer(timer), cloud(*this, TDMA_CAT_CLOUD_NAMESPACE), datagram(*this, TDMA_CAT_DATAGRAM_NAMESPACE), event(*this, TDMA_CAT_EVENT_NAMESPACE)
+TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cloud(*this, TDMA_CAT_CLOUD_NAMESPACE), datagram(*this, TDMA_CAT_DATAGRAM_NAMESPACE), event(*this, TDMA_CAT_EVENT_NAMESPACE)
 {
     this->id = id;
-    this->appId = appId;
     this->status = 0;
 
-    memset(this->txArray, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
-    memset(this->rxArray, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
-    memset(this->bufferPool, sizeof(TDMACATSuperFrame*) * TDMA_CAT_BUFFER_POOL_SIZE);
+    memset(this->txQueue, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
+    memset(this->rxQueue, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
+    memset(this->bufferPool, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_BUFFER_POOL_SIZE);
 
     this->rxHead = 0;
     this->rxTail = 0;
@@ -482,17 +489,17 @@ int TDMACATRadio::setFrequencyBand(int band)
 
 void TDMACATRadio::addBufferToPool(TDMACATSuperFrame* q)
 {
-    for (int i = 0; i < BUFFER_POOL_SIZE; i++)
-        if (buffer_pool[i] == NULL)
+    for (int i = 0; i < TDMA_CAT_BUFFER_POOL_SIZE; i++)
+        if (this->bufferPool[i] == NULL)
         {
-            buffer_pool[i] = q;
+            this->bufferPool[i] = q;
             return;
         }
 }
 
 TDMACATSuperFrame* TDMACATRadio::getBufferFromPool()
 {
-    for (int i = 0; i < BUFFER_POOL_SIZE; i++)
+    for (int i = 0; i < TDMA_CAT_BUFFER_POOL_SIZE; i++)
         if (this->bufferPool[i])
         {
             TDMACATSuperFrame* p = this->bufferPool[i];
@@ -503,9 +510,9 @@ TDMACATSuperFrame* TDMACATRadio::getBufferFromPool()
     return NULL;
 }
 
-int TDMACATRadio::addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, int* tail, int* head)
+int TDMACATRadio::addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, uint8_t* tail, uint8_t* head)
 {
-    int next_head = (*head + 1) % QUEUE_SIZE;
+    int next_head = (*head + 1) % TDMA_CAT_QUEUE_SIZE;
 
     if (next_head == *tail)
         return MICROBIT_NO_RESOURCES;
@@ -516,14 +523,14 @@ int TDMACATRadio::addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, 
     return MICROBIT_OK;
 }
 
-TDMACATSuperFrame* TDMACATRadio::getBufferFromQueue(TDMACATSuperFrame** q, int* tail, int* head)
+TDMACATSuperFrame* TDMACATRadio::getBufferFromQueue(TDMACATSuperFrame** q, uint8_t* tail, uint8_t* head)
 {
     if (*head == *tail)
         return NULL;
 
     TDMACATSuperFrame* p = q[*tail];
     q[*tail] = NULL;
-    *tail = (*tail + 1) % QUEUE_SIZE;
+    *tail = (*tail + 1) % TDMA_CAT_QUEUE_SIZE;
 
     return p;
 }
@@ -563,6 +570,8 @@ int TDMACATRadio::enable()
     // pre allocate all buffers
     for (int i = 0; i < TDMA_CAT_BUFFER_POOL_SIZE; i++)
         this->bufferPool[i] = new TDMACATSuperFrame;
+
+    this->currentBuffer = getBufferFromPool();
 
     // Enable the High Frequency clock on the processor. This is a pre-requisite for
     // the RADIO module. Without this clock, no communication is possible.
@@ -623,14 +632,11 @@ int TDMACATRadio::enable()
     // Set the start random value of the data whitening algorithm. This can be any non zero number.
     NRF_RADIO->DATAWHITEIV = MICROBIT_RADIO_DEFAULT_FREQUENCY;
 
-    // Set up the RADIO module to read and write from our internal buffer.
-    NRF_RADIO->PACKETPTR = (uint32_t)rxBuf;
-
     NRF_RADIO->EVENTS_READY = 0;
     NRF_RADIO->EVENTS_END = 0;
     // NRF_RADIO->TIFS = 300;
-    NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->rxBuf;
-    NRF_RADIO->SHORTS = /*RADIO_SHORTS_READY_START_Msk |*/ RADIO_SHORTS_END_DISABLE_Msk | RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
+    NRF_RADIO->PACKETPTR = (uint32_t)TDMACATRadio::instance->currentBuffer;
+    NRF_RADIO->SHORTS = RADIO_SHORTS_READY_START_Msk | RADIO_SHORTS_END_DISABLE_Msk | RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
 
     radioState = RADIO_STATE_RECEIVE;
 
@@ -641,24 +647,15 @@ int TDMACATRadio::enable()
     NVIC_SetPriority(RADIO_IRQn, 0);
     NVIC_EnableIRQ(RADIO_IRQn);
 
-    // set cc1 to trigger radio disable, set an end event to capture timestamp in cc2
-    NRF_PPI->CHEN |= (1 << DIS_PPI_CHAN_BIT_POS) | (1 << END_CC_PPI_CHAN_BIT_POS);
-
-    #error sort this out
-
+    PPI_ENABLE_CHAN(PPI_CHAN_END);
 
     tdmaState = TDMA_STATE_EXPLORER;
 
     // disable after 2 seconds, and perform application tasks
-    TIMER_SET_CC(TIMER_CC_DISABLE, 2000000);
+    // TIMER_SET_CC(TIMER_CC_DISABLE, 2000000);
     TIMER_SET_CC_IRQ(TIMER_CC_TDMA, 2000000);
 
     NRF_RADIO->TASKS_RXEN = 1;
-
-    volatile int i = 250;
-    while(i-- > 0);
-
-    NRF_RADIO->TASKS_START = 1;
 
     // Done. Record that our RADIO is configured.
     status |= MICROBIT_RADIO_STATUS_INITIALISED;
@@ -700,7 +697,15 @@ TDMACATSuperFrame* TDMACATRadio::peakRxQueue()
     if (this->rxTail == this->rxHead)
         return NULL;
 
-    return rxArray[this->rxHead];
+    return rxQueue[this->rxHead];
+}
+
+TDMACATSuperFrame* TDMACATRadio::peakTxQueue()
+{
+    if (this->txTail == this->txHead)
+        return NULL;
+
+    return txQueue[this->txHead];
 }
 
 /**
@@ -715,56 +720,24 @@ TDMACATSuperFrame* TDMACATRadio::peakRxQueue()
   */
 TDMACATSuperFrame* TDMACATRadio::recv()
 {
-    if (this->rxTail == this->rxHead)
-        return NULL;
+    TDMACATSuperFrame* ret = NULL;
+    TDMACATSuperFrame* p = getBufferFromQueue(this->rxQueue, &this->rxTail, &this->rxHead);
 
-    uint8_t nextHead = (this->rxHead + 1) % MICROBIT_RADIO_MAXIMUM_RX_BUFFERS;
+    if (p)
+    {
+        ret = new TDMACATSuperFrame;
+        memcpy(ret, p, sizeof(TDMACATSuperFrame));
+        addBufferToPool(p);
+    }
 
-    TDMACATSuperFrame *p = rxArray[nextHead];
-    this->rxArray[nextHead] = NULL;
-    this->rxHead = nextHead;
-    rxQueueDepth--;
-
-    return p;
+    return ret;
 }
 
 void TDMACATRadio::idleTick()
 {
-    // if (radio_status & RADIO_STATUS_QUEUE_KEEP_ALIVE)
-    // {
-    //     queueKeepAlive();
-    //     PERIDO_UNSET_FLAGS(RADIO_STATUS_QUEUE_KEEP_ALIVE);
-    // }
-
-    // walk the array of tx'd packets and fire packetTransmitted for each driver...
-    while (tx_packets_head != tx_packets_tail)
-    {
-        uint8_t next_tx_head = (tx_packets_head + 1) % TX_PACKETS_SIZE;
-        uint8_t namespace_id = tx_packets[tx_packets_head] >> 16;
-        uint16_t id = tx_packets[tx_packets_head] & 0xFFFF;
-
-        if (namespace_id == cloud.getNamespaceId())
-            cloud.packetTransmitted(id);
-
-        tx_packets_head = next_tx_head;
-    }
-
-    // Walk the list of received packets and process each one.
     TDMACATSuperFrame* p = NULL;
-    while ((p = peakRxQueue()) != NULL)
-    {
-        if (p->namespace_id == cloud.getNamespaceId())
-            cloud.packetReceived();
-
-        else if (p->namespace_id == datagram.getNamespaceId())
-            datagram.packetReceived();
-
-        else if (p->namespace_id == event.getNamespaceId())
-            event.packetReceived();
-
-        else
-            delete recv();
-    }
+    while((p = recv()))
+        delete p;
 }
 
 
@@ -795,57 +768,26 @@ int TDMACATRadio::send(TDMACATSuperFrame* buffer)
   * @return MICROBIT_OK on success, or MICROBIT_INVALID_PARAMETER if the buffer is invalid,
   *         or the number of bytes to transmit is greater than `MICROBIT_RADIO_MAX_PACKET_SIZE + MICROBIT_RADIO_HEADER_SIZE`.
   */
-int TDMACATRadio::send(uint8_t *buffer, int len, uint8_t namespaceId)
+int TDMACATRadio::send(uint8_t *buffer, int len)
 {
     if (buffer == NULL || len < 0 || len > TDMA_CAT_MAX_PACKET_SIZE + TDMA_CAT_HEADER_SIZE - 1)
         return MICROBIT_INVALID_PARAMETER;
 
     TDMACATSuperFrame buf;
 
-    buf.id = microbit_random(65535);
+    buf.device_id = microbit_serial_number();
+    buf.slot_id = 0;
+    buf.frame_id = 0;
+    buf.flags = 0;
     buf.length = len + TDMA_CAT_HEADER_SIZE - 1;
-    buf.app_id = appId;
-    buf.namespace_id = namespaceId;
     buf.ttl = TDMA_CAT_DEFAULT_TTL;
     buf.initial_ttl = TDMA_CAT_DEFAULT_TTL;
-    buf.time_since_wake = 0;
-    buf.period = 0;
     memcpy(buf.payload, buffer, len);
 
     return send(&buf);
 }
 
-uint16_t TDMACATRadio::generateId(uint8_t app_id, uint8_t namespace_id)
-{
-    uint16_t new_id;
-    bool seenBefore = true;
-
-    // while (seenBefore)
-    // {
-    //     seenBefore = false;
-    //     new_id = microbit_random(65535);
-
-    //     for (int i = 0; i < LAST_SEEN_BUFFER_SIZE; i++)
-    //     {
-    //         if (last_seen[i] > 0)
-    //         {
-    //             uint8_t seen_namespace_id = last_seen[i];
-    //             uint8_t seen_app_id = last_seen[i] >> 8;
-
-    //             // we can exit early here as if the namespaces don't match we're not interested.
-    //             if (namespace_id != seen_namespace_id || app_id != seen_app_id)
-    //                 continue;
-
-    //             uint16_t packet_id = (last_seen[i] >> 16);
-    //             if (packet_id == new_id)
-    //                 seenBefore = true;
-    //         }
-    //     }
-    // }
-
-    return new_id;
-}
-
+#if TDMA_CAT_TEST_MODE == 1
 int TDMACATRadio::setTestRole(TestRole t)
 {
     testRole = t;
@@ -886,7 +828,7 @@ int TDMACATRadio::sendTestResults(uint8_t* data, uint8_t length)
 
     return MICROBIT_OK;
 }
-
+#endif
 
 
 // #if TDMA_CAT_TEST_MODE == 1

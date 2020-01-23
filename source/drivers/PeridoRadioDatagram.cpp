@@ -133,7 +133,7 @@ int PeridoRadioDatagram::send(uint8_t *buffer, int len)
     if (buffer == NULL || len < 0 || len > TDMA_CAT_MAX_PACKET_SIZE + TDMA_CAT_HEADER_SIZE - 1)
         return MICROBIT_INVALID_PARAMETER;
 
-    return radio.send(buffer, len, this->namespaceId);
+    return radio.send(buffer, len);
 }
 
 /**

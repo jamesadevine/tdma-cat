@@ -63,6 +63,7 @@ struct TDMACATSuperFrame;
  * For serious applications, BLE should be considered a substantially more secure alternative.
  */
 
+#define IGNORE_FUTURE_PROBLEMS              1
 #define TDMA_CAT_TEST_MODE                  0
 
 // in test mode, we only transmit one packet
@@ -113,7 +114,7 @@ struct TDMACATSuperFrame
 {
     uint8_t             length;                             // The length of the remaining bytes in the packet.
     uint8_t             slot_id;
-    uint8_t             flags;
+    uint8_t             frame_id:4, flags:4;
     uint8_t             ttl:4, initial_ttl:4;
     uint64_t            device_id;
     uint8_t             payload[TDMA_CAT_MAX_PACKET_SIZE];    // User / higher layer protocol data
@@ -136,8 +137,8 @@ class TDMACATRadio : public MicroBitComponent
 
     void addBufferToPool(TDMACATSuperFrame* q);
     TDMACATSuperFrame* getBufferFromPool();
-    int addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, int* tail, int* head);
-    TDMACATSuperFrame* getBufferFromQueue(TDMACATSuperFrame** q, int* tail, int* head);
+    int addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, uint8_t* tail, uint8_t* head);
+    TDMACATSuperFrame* getBufferFromQueue(TDMACATSuperFrame** q, uint8_t* tail, uint8_t* head);
     int queueTxFrame(TDMACATSuperFrame* s);
 
     public:
@@ -149,13 +150,13 @@ class TDMACATRadio : public MicroBitComponent
 
     // a fifo array of received packets
     // the array can hold a maximum of TDMA_CAT_QUEUE_SIZE - 1 packets
-    TDMACATSuperFrame       *rxArray[TDMA_CAT_QUEUE_SIZE];
+    TDMACATSuperFrame       *rxQueue[TDMA_CAT_QUEUE_SIZE];
     uint8_t                 rxHead; // head points to the last rx'd packet-1
     uint8_t                 rxTail; // tail points to the first rx'd packet
 
     // a fifo array of transmitted packets
     // the array can hold a maximum of TDMA_CAT_QUEUE_SIZE - 1 packets
-    TDMACATSuperFrame       *txArray[TDMA_CAT_QUEUE_SIZE];
+    TDMACATSuperFrame       *txQueue[TDMA_CAT_QUEUE_SIZE];
     uint8_t                 txHead; // head points to the last packet to be tx'd
     uint8_t                 txTail; // head points to the first packet to be tx'd
 
@@ -173,7 +174,7 @@ class TDMACATRadio : public MicroBitComponent
       * @note This class is demand activated, as a result most resources are only
       *       committed if send/recv or event registrations calls are made.
       */
-    TDMACATRadio(LowLevelTimer& timer, uint8_t appId = TDMA_CAT_DEFAULT_APP_ID, uint16_t id = MICROBIT_ID_RADIO);
+    TDMACATRadio(LowLevelTimer& timer, uint16_t id = MICROBIT_ID_RADIO);
 
     /**
       * Change the output power level of the transmitter to the given value.
@@ -216,10 +217,6 @@ class TDMACATRadio : public MicroBitComponent
 
     int queueTxBuf(TDMACATSuperFrame* tx);
 
-    TDMACATSuperFrame* getCurrentTxBuf();
-
-    int queueKeepAlive();
-
     /**
       * Initialises the radio for use as a multipoint sender/receiver
       *
@@ -235,22 +232,6 @@ class TDMACATRadio : public MicroBitComponent
     int disable();
 
     /**
-      * Sets the radio to listen to packets sent with the given group id.
-      *
-      * @param group The group to join. A micro:bit can only listen to one group ID at any time.
-      *
-      * @return MICROBIT_OK on success, or MICROBIT_NOT_SUPPORTED if the BLE stack is running.
-      */
-    int setGroup(uint8_t group);
-
-    /**
-      * Determines the number of packets ready to be processed.
-      *
-      * @return The number of packets in the receive buffer.
-      */
-    int dataReady();
-
-    /**
       * Retrieves the next packet from the receive buffer.
       * If a data packet is available, then it will be returned immediately to
       * the caller. This call will also dequeue the buffer.
@@ -263,16 +244,12 @@ class TDMACATRadio : public MicroBitComponent
     TDMACATSuperFrame* recv();
 
     TDMACATSuperFrame* peakRxQueue();
+    TDMACATSuperFrame* peakTxQueue();
 
     void idleTick();
 
-    int setAppId(uint16_t id);
-
-    int getAppId();
-
     /**
       * Transmits the given buffer onto the broadcast radio.
-      * The call will wait until the transmission of the packet has completed before returning.
       *
       * @param data The packet contents to transmit.
       *
@@ -280,12 +257,7 @@ class TDMACATRadio : public MicroBitComponent
       */
     int send(TDMACATSuperFrame* buffer);
 
-    int send(uint8_t *buffer, int len, uint8_t namespaceId);
-
-    /**
-     * Generates an id based on historic information.
-     **/
-    uint16_t generateId(uint8_t app_id, uint8_t namespace_id);
+    int send(uint8_t *buffer, int len);
 
 #if TDMA_CAT_TEST_MODE == 1
     int setTestRole(TestRole t);

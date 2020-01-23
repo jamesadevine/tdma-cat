@@ -23,10 +23,12 @@ void DebugBridge::onRadioPacket(MicroBitEvent)
     {
         TDMACATSuperFrame* packet = r->packet;
         DataPacket* dp = (DataPacket*)packet->payload;
+#if IGNORE_FUTURE_PROBLEMS == 0
         if (dp->request_type & REQUEST_STATUS_ERROR || dp->request_type & REQUEST_STATUS_OK)
             serial.printf("RESP: aid: %d nsid: %d rid: %d time: %d\r\n", packet->app_id, packet->namespace_id, dp->request_id, (int)system_timer_current_time());
         else
             serial.printf("REQ: aid: %d nsid: %d rid: %d time: %d\r\n", packet->app_id, packet->namespace_id, dp->request_id, (int)system_timer_current_time());
+#endif
         delete r;
     }
 }

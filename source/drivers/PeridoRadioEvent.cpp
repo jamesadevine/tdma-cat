@@ -166,7 +166,7 @@ void PeridoRadioEvent::eventReceived(MicroBitEvent e)
     if(suppressForwarding)
         return;
 
-    radio.send((uint8_t*)&e, sizeof(MicroBitEvent), this->namespaceId);
+    radio.send((uint8_t*)&e, sizeof(MicroBitEvent));
 }
 
 uint8_t PeridoRadioEvent::getNamespaceId()

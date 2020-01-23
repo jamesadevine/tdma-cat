@@ -17,6 +17,8 @@ int tdma_init(uint64_t device_identifier)
     adv.flags = 0;
 
     table[TDMA_CAT_ADVERTISEMENT_SLOT] = adv;
+
+    return MICROBIT_OK;
 }
 
 int tdma_set_slot(TDMA_CAT_Slot slot)
@@ -87,7 +89,7 @@ int tdma_advert_required()
  **/
 int tdma_slots_till_next_tx()
 {
-    uint32_t i = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
+    int i = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
     int slot_counter = 0;
 
     while (i != current_slot)

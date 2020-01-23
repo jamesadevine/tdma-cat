@@ -49,6 +49,7 @@ void PeridoBridge::queueTestResponse()
     int len = CLOUD_HEADER_SIZE + response.length();
     memcpy(dp->payload, response.getBytes(), response.length());
 
+#if IGNORE_FUTURE_PROBLEMS == 0
     buf->id = radio.generateId(serialPacket.app_id, serialPacket.namespace_id);
     buf->length = len + (TDMA_CAT_HEADER_SIZE - 1);
     buf->app_id = serialPacket.app_id;
@@ -57,6 +58,7 @@ void PeridoBridge::queueTestResponse()
     buf->initial_ttl = 2;
     buf->time_since_wake = 0;
     buf->period = 0;
+#endif
 
     LOG_STRING("COPY!");
     memcpy(buf->payload, &serialPacket.request_id, len);
@@ -148,8 +150,10 @@ void PeridoBridge::onRadioPacket(MicroBitEvent)
     {
         TDMACATSuperFrame* packet = r->packet;
 
+#if IGNORE_FUTURE_PROBLEMS == 0
         serialPacket.app_id = packet->app_id;
         serialPacket.namespace_id = packet->namespace_id;
+#endif
         // first two bytes of the payload nicely contain the id.
         memcpy(&serialPacket.request_id, packet->payload, packet->length - (TDMA_CAT_HEADER_SIZE - 1));
 
@@ -269,6 +273,7 @@ void PeridoBridge::onSerialPacket(MicroBitEvent)
         CloudDataItem* cloudData = new CloudDataItem;
         TDMACATSuperFrame* buf = new TDMACATSuperFrame;
 
+#if IGNORE_FUTURE_PROBLEMS == 0
         buf->id = radio.generateId(serialPacket.app_id, serialPacket.namespace_id);
         buf->length = len + (TDMA_CAT_HEADER_SIZE - 1);
         buf->app_id = serialPacket.app_id;
@@ -278,7 +283,7 @@ void PeridoBridge::onSerialPacket(MicroBitEvent)
         buf->time_since_wake = 0;
         buf->period = 0;
         memcpy(buf->payload, &serialPacket.request_id, len);
-
+#endif
         cloudData->packet = buf;
         // we queue and flag the packet as waiting to send, it expects and ack, but no response
         cloudData->status = DATA_PACKET_WAITING_FOR_SEND | DATA_PACKET_EXPECT_NO_RESPONSE;

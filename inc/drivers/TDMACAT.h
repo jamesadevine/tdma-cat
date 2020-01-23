@@ -13,6 +13,8 @@
 #define TDMA_CAT_ADVERTISEMENT_SLOT     0
 #define TDMA_CAT_UNITIALISED_SLOT       -1
 
+#define TDMA_SLOT_FLAGS_ADVERTISED      0x1
+
 struct TDMA_CAT_Slot {
     uint64_t device_identifier;
     uint16_t slot_identifier;
