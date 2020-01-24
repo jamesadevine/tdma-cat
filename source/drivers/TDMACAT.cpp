@@ -1,5 +1,6 @@
 #include "TDMACAT.h"
 #include "ErrorNo.h"
+#include "TDMACATRadio.h"
 
 static TDMA_CAT_Slot table[TDMA_CAT_TABLE_SIZE];
 static int current_slot = TDMA_CAT_UNITIALISED_SLOT;
@@ -103,5 +104,31 @@ int tdma_slots_till_next_tx()
     }
 
     return MICROBIT_NO_RESOURCES;
+}
+
+int tdma_fill_advertising_frame(TDMACATSuperFrame* frame)
+{
+    uint8_t* slots = frame->payload;
+    int advertIndex = 0;
+
+    TDMA_CAT_Slot meta = table[TDMA_CAT_ADVERTISEMENT_SLOT];
+
+    frame->ttl = TDMA_CAT_DEFAULT_ADVERT_TTL;
+    frame->initial_ttl = TDMA_CAT_DEFAULT_ADVERT_TTL;
+    frame->device_id = meta.device_identifier;
+    frame->slot_id = TDMA_CAT_ADVERTISEMENT_SLOT;
+    frame->frame_id = 0;
+    frame->flags = TMDMA_CAT_FRAME_FLAGS_ADVERT;
+
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+        if (table[i].ttl ==  0 && !(table[i].flags & TDMA_SLOT_FLAGS_ADVERTISED))
+        {
+            table[i].flags &= ~(TDMA_SLOT_FLAGS_ADVERTISED);
+            slots[advertIndex++] = i;
+        }
+
+    frame->length = advertIndex + TDMA_CAT_HEADER_SIZE - 1;
+
+    return MICROBIT_OK;
 }
 

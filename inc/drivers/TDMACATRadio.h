@@ -134,14 +134,21 @@ enum TestRole {
 
 class TDMACATRadio : public MicroBitComponent
 {
+    public:
 
     void addBufferToPool(TDMACATSuperFrame* q);
     TDMACATSuperFrame* getBufferFromPool();
     int addBufferToQueue(TDMACATSuperFrame** q, TDMACATSuperFrame* p, uint8_t* tail, uint8_t* head);
     TDMACATSuperFrame* getBufferFromQueue(TDMACATSuperFrame** q, uint8_t* tail, uint8_t* head);
-    int queueTxFrame(TDMACATSuperFrame* s);
 
-    public:
+    int queueTxFrame(TDMACATSuperFrame* s);
+    int queueRxFrame(TDMACATSuperFrame* rx);
+
+    TDMACATSuperFrame* peakRxQueue();
+    TDMACATSuperFrame* peakTxQueue();
+    TDMACATSuperFrame* popTxQueue();
+
+
 
     LowLevelTimer&          timer;
     PeridoRadioCloud        cloud;          // A simple REST handling service.
@@ -162,9 +169,9 @@ class TDMACATRadio : public MicroBitComponent
 
     TDMACATSuperFrame       *bufferPool[TDMA_CAT_BUFFER_POOL_SIZE];
 
-    TDMACATSuperFrame       *currentBuffer;
+    TDMACATSuperFrame       staticFrame;
 
-    static TDMACATRadio    *instance;  // A singleton reference, used purely by the interrupt service routine.
+    static TDMACATRadio     *instance;  // A singleton reference, used purely by the interrupt service routine.
 
     /**
       * Constructor.
@@ -196,28 +203,6 @@ class TDMACATRadio : public MicroBitComponent
     int setFrequencyBand(int band);
 
     /**
-      * Retrieve a pointer to the currently allocated receive buffer. This is the area of memory
-      * actively being used by the radio hardware to store incoming data.
-      *
-      * @return a pointer to the current receive buffer.
-      */
-    TDMACATSuperFrame * getRxBuf();
-
-    int popTxQueue();
-
-    TDMACATSuperFrame* getTxBuf();
-
-    /**
-      * Attempt to queue a buffer received by the radio hardware, if sufficient space is available.
-      *
-      * @return MICROBIT_OK on success, or MICROBIT_NO_RESOURCES if a replacement receiver buffer
-      *         could not be allocated (either by policy or memory exhaustion).
-      */
-    int copyRxBuf();
-
-    int queueTxBuf(TDMACATSuperFrame* tx);
-
-    /**
       * Initialises the radio for use as a multipoint sender/receiver
       *
       * @return MICROBIT_OK on success, MICROBIT_NOT_SUPPORTED if the BLE stack is running.
@@ -242,9 +227,6 @@ class TDMACATRadio : public MicroBitComponent
       *       delete the buffer when appropriate.
       */
     TDMACATSuperFrame* recv();
-
-    TDMACATSuperFrame* peakRxQueue();
-    TDMACATSuperFrame* peakTxQueue();
 
     void idleTick();
 
