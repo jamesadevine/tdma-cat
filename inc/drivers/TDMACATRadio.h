@@ -66,6 +66,10 @@ struct TDMACATSuperFrame;
 #define IGNORE_FUTURE_PROBLEMS              1
 #define TDMA_CAT_TEST_MODE                  0
 
+#ifndef TDMA_CAT_DIRECT_DEBUG
+#define TDMA_CAT_DIRECT_DEBUG               1
+#endif
+
 // in test mode, we only transmit one packet
 #if TDMA_CAT_TEST_MODE == 1
     #define TDMA_CAT_DEFAULT_TTL            1

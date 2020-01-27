@@ -27,7 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 #include "TDMACATRadio.h"
 
-#if TDMA_CAT_DIRECT_DEBUG == 0
+#if TDMA_CAT_DIRECT_DEBUG == 1
 
 #if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
 
@@ -192,91 +192,6 @@ inline void SYNC_TO_FRAME(int ttl, int initial_ttl, int packet_size)
 
 void timer_callback(uint8_t)
 {
-    TIMER_STOP();
-    TIMER_CLEAR();
-    TIMER_START();
-
-    memset((void*)frame_tracker, 0, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
-    memset(&TDMACATRadio::instance->staticFrame, 0, sizeof(TDMACATSuperFrame));
-
-    int owner = 1;
-
-    if (tdma_is_synchronised())
-        owner = tdma_advance_slot();
-    else
-    {
-        TDMA_CAT_Slot slot;
-        slot.slot_identifier = TDMA_CAT_ADVERTISEMENT_SLOT;
-        tdma_synchronise(slot);
-    }
-
-    if (owner)
-    {
-        bool needToTransmit = false;
-
-        if (tdma_is_advertising_slot())
-        {
-            // do we need to send an advert?
-            if (tdma_advert_required())
-            {
-                tdma_fill_advertising_frame(&TDMACATRadio::instance->staticFrame);
-                needToTransmit = true;
-            }
-
-        }
-        // anything to send?
-        else if (TDMACATRadio::instance->peakTxQueue())
-        {
-            needToTransmit = true;
-
-            TDMACATSuperFrame* p = TDMACATRadio::instance->popTxQueue();
-
-            if (p)
-            {
-                memcpy(&TDMACATRadio::instance->staticFrame, p, sizeof(TDMACATSuperFrame));
-                // return the buffer to the pool of buffers
-                TDMACATRadio::instance->addBufferToPool(p);
-            }
-        }
-        else
-        {
-            needToTransmit = true;
-            // it's our slot but we have nothing to send. Let's send a keep alive message
-            // to ensure that we do not lose our slot.
-            TDMACATRadio::instance->staticFrame.flags |= TMDMA_CAT_FRAME_FLAGS_DONE;
-        }
-
-        if (needToTransmit)
-        {
-            tdmaState = TDMA_STATE_OWNER;
-            radioState = RADIO_STATE_TRANSMIT;
-
-            // set packet pointer!!
-            NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
-
-            // random backoff
-            TIMER_SET_CC(TIMER_CC_TX_RX, 2000 + microbit_random(TDMA_CAT_SLOT_SIZE_US));
-            TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
-
-            PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
-            PPI_ENABLE_CHAN(PPI_CHAN_END);
-            PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
-            return;
-        }
-    }
-
-    // if we don't need to transmit, we drop through into receive mode.
-    tdmaState = TDMA_STATE_REPEATER;
-    radioState = RADIO_STATE_RECEIVE;
-
-    NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
-
-    TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
-    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
-
-    PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
-    PPI_ENABLE_CHAN(PPI_CHAN_END);
-    PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
 }
 
 extern "C" void RADIO_IRQHandler(void)
@@ -284,89 +199,11 @@ extern "C" void RADIO_IRQHandler(void)
     NRF_RADIO->EVENTS_END = 0;
     TDMACATSuperFrame *p = &TDMACATRadio::instance->staticFrame;
 
-    if (radioState == RADIO_STATE_FORWARD)
-    {
-        radioState = RADIO_STATE_RECEIVE;
-        memset(p, 0, sizeof(TDMACATSuperFrame));
-        NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
-        while(NRF_RADIO->EVENTS_DISABLED == 0);
-#if TDMA_CAT_ASSERT == 1
-        HW_ASSERT(0,0);
-#endif
-        RADIO_ENABLE_READY_START_SHORT();
-        NRF_RADIO->TASKS_RXEN = 1;
-        packets_forwarded++;
-        return;
-    }
-
     if (radioState == RADIO_STATE_RECEIVE)
     {
-        bool crc = NRF_RADIO->CRCSTATUS == 1;
-        process_packet(p, crc, 0);
-        if(NRF_RADIO->CRCSTATUS == 1)
-        {
-            if(p->ttl != 0)
-            {
-                p->ttl--;
-                radioState = RADIO_STATE_FORWARD;
-                NRF_RADIO->PACKETPTR = (uint32_t)p;
-
-#if TDMA_CAT_ASSERT == 1
-                HW_ASSERT(0,0);
-#endif
-                NRF_RADIO->EVENTS_DISABLED = 0;
-                RADIO_DISABLE_READY_START_SHORT();
-
-                NRF_RADIO->TASKS_TXEN = 1;
-                volatile int i = 250;
-                while(i-- > 0);
-                NRF_RADIO->TASKS_START = 1;
-            }
-
-            packets_received++;
-
-            // check if we've seen it
-            if (!FRAME_SEEN(p->frame_id))
-            {
-                // track it to prevent duplication.
-                TRACK_FRAME(p->frame_id);
-                SYNC_TO_FRAME(p->ttl, p->initial_ttl, p->length);
-                process_packet(p, crc, 1);
-
-                TDMA_CAT_Slot slot;
-                slot.device_identifier = p->device_id;
-                slot.ttl = p->ttl;
-                slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
-                slot.flags = 0;
-
-                if (p->flags & TMDMA_CAT_FRAME_FLAGS_ADVERT)
-                {
-
-                    for (int i = 0; i < p->length - (TDMA_CAT_HEADER_SIZE - 1); i++)
-                    {
-                        slot.slot_identifier = p->payload[i];
-                        tdma_set_slot(slot);
-                    }
-                }
-                else
-                {
-                    slot.slot_identifier = p->slot_id;
-                    tdma_set_slot(slot);
-                    TDMACATRadio::instance->queueRxFrame(&TDMACATRadio::instance->staticFrame);
-                }
-                process_packet(p, crc, 2);
-            }
-            return;
-        }
-        else
-        {
-            packets_error++;
-        }
-
-        process_packet(p, crc, 3);
-
         packets_received++;
         NRF_RADIO->PACKETPTR = (uint32_t)p;
+        process_packet(p, NRF_RADIO->CRCSTATUS == 1, 0);
 #if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
 #endif
@@ -379,8 +216,8 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_TRANSMIT)
     {
         radioState = RADIO_STATE_RECEIVE;
+        process_packet(p, true, 0);
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
-        process_packet(p, 0, 4);
         while(NRF_RADIO->EVENTS_DISABLED == 0);
 #if TDMA_CAT_TEST_MODE == 1
         HW_ASSERT(0,0);
@@ -392,24 +229,7 @@ extern "C" void RADIO_IRQHandler(void)
         return;
     }
 }
-
 #endif // perido
-
-void manual_poke(TDMACATSuperFrame* p)
-{
-    NRF_RADIO->TASKS_DISABLE = 1;
-    while (NRF_RADIO->EVENTS_DISABLED == 0);
-    NRF_RADIO->EVENTS_DISABLED = 0;
-
-#if TDMA_CAT_TEST_MODE == 1
-        HW_ASSERT(0,0);
-#endif
-
-    radioState = RADIO_STATE_TRANSMIT;
-    NRF_RADIO->PACKETPTR = (uint32_t)p;
-    RADIO_ENABLE_READY_START_SHORT();
-    NRF_RADIO->TASKS_TXEN = 1;
-}
 
 #pragma GCC pop_options
 
@@ -457,8 +277,6 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cl
     NRF_TIMER0->CC[3] = 0;
 
     microbit_seed_random();
-
-    tdma_init(microbit_serial_number());
 
     instance = this;
 }
@@ -687,14 +505,6 @@ int TDMACATRadio::enable()
     NVIC_SetPriority(RADIO_IRQn, 0);
     NVIC_EnableIRQ(RADIO_IRQn);
 
-    PPI_ENABLE_CHAN(PPI_CHAN_END);
-
-    tdmaState = TDMA_STATE_EXPLORER;
-
-    // disable after 2 seconds, and perform application tasks
-    // TIMER_SET_CC(TIMER_CC_DISABLE, 2000000);
-    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, 2000000);
-
     NRF_RADIO->TASKS_RXEN = 1;
 
     // Done. Record that our RADIO is configured.
@@ -791,7 +601,21 @@ void TDMACATRadio::idleTick()
   */
 int TDMACATRadio::send(TDMACATSuperFrame* buffer)
 {
-    return queueTxFrame(buffer);
+    memcpy(&this->staticFrame, buffer, sizeof(TDMACATSuperFrame));
+
+    NRF_RADIO->TASKS_DISABLE = 1;
+    while (NRF_RADIO->EVENTS_DISABLED == 0);
+    NRF_RADIO->EVENTS_DISABLED = 0;
+
+#if TDMA_CAT_TEST_MODE == 1
+        HW_ASSERT(0,0);
+#endif
+
+    radioState = RADIO_STATE_TRANSMIT;
+    NRF_RADIO->PACKETPTR = (uint32_t)&this->staticFrame;
+    RADIO_ENABLE_READY_START_SHORT();
+    NRF_RADIO->TASKS_TXEN = 1;
+    return MICROBIT_OK;
 }
 
 
@@ -869,8 +693,8 @@ int TDMACATRadio::sendTestResults(uint8_t* data, uint8_t length)
     return MICROBIT_OK;
 }
 
-#endif // TEST MODE
-#endif // DIRECT DEBUG
+#endif // test mode
+#endif // direct debug
 
 
 // #if TDMA_CAT_TEST_MODE == 1

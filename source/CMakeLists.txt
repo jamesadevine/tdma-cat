@@ -52,6 +52,7 @@ set(YOTTA_AUTO_MICROBIT-DAL_CPP_FILES
     "drivers/RadioREST.cpp"
     "drivers/TDMACAT.cpp"
     "drivers/TDMACATRadio.cpp"
+    "drivers/TDMACATRadioDebug.cpp"
 
     "drivers/DebugBridge.cpp"
     "drivers/PeridoBridge.cpp"
