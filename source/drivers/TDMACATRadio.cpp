@@ -694,6 +694,7 @@ int TDMACATRadio::enable()
     // disable after 2 seconds, and perform application tasks
     // TIMER_SET_CC(TIMER_CC_DISABLE, 2000000);
     TIMER_SET_CC_IRQ(TIMER_CC_TDMA, 2000000);
+    // TIMER_START();
 
     NRF_RADIO->TASKS_RXEN = 1;
 
