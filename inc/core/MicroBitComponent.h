@@ -68,9 +68,13 @@ DEALINGS IN THE SOFTWARE.
 #define MICROBIT_ID_MULTIBUTTON_ATTACH  31
 #define MICROBIT_ID_SERIAL              32
 
-#define MICROBIT_ID_RADIO_TX            33
+#define MICROBIT_ID_IO_INT1             33          //INT1
+#define MICROBIT_ID_IO_INT2             34          //INT2
+#define MICROBIT_ID_IO_INT3             35          //INT3
+#define MICROBIT_ID_PARTIAL_FLASHING    36
 
-#define MICROBIT_ID_ENERGY_MONITOR      34
+#define MICROBIT_ID_RADIO_TX            37
+#define MICROBIT_ID_ENERGY_MONITOR      38
 
 #define MICROBIT_ID_MESSAGE_BUS_LISTENER            1021          // Message bus indication that a handler for a given ID has been registered.
 #define MICROBIT_ID_NOTIFY_ONE                      1022          // Notfication channel, for general purpose synchronisation
