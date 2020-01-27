@@ -51,10 +51,9 @@ TDMA_CAT_Slot tdma_get_current_slot()
     return table[current_slot];
 }
 
-int tdma_synchronise(TDMA_CAT_Slot slot)
+void tdma_set_current_slot(int slot_id)
 {
-    current_slot = slot.slot_identifier;
-    return tdma_set_slot(slot);
+    current_slot = slot_id;
 }
 
 /**

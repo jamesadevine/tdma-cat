@@ -27,9 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 #include "TDMACATRadio.h"
 
-#if TDMA_CAT_DIRECT_DEBUG == 0
-
-#if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
+#if (TDMA_CAT_DIRECT_DEBUG == 0 && MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO)
 
 #include "TDMACAT.h"
 #include "MicroBitComponent.h"
@@ -43,12 +41,13 @@ DEALINGS IN THE SOFTWARE.
 
 TDMACATRadio* TDMACATRadio::instance = NULL;
 
-#define TIME_TO_TRANSMIT_BYTE_1MB   8
-#define TX_PACKETS_SIZE             (2 * TDMA_CAT_MAXIMUM_TX_BUFFERS)
-#define FRAME_TRACKER_BUFFER_SIZE   20
+#define TIME_TO_TRANSMIT_BYTE_1MB           8
+#define TX_PACKETS_SIZE                     (2 * TDMA_CAT_MAXIMUM_TX_BUFFERS)
+#define FRAME_TRACKER_BUFFER_SIZE           20
+#define FRAME_TRACKER_UNITIALISED_VALUE     255
 
-#define RX_TX_DISABLE_TIME          3
-#define TX_ENABLE_TIME              166
+#define RX_TX_DISABLE_TIME                  3
+#define TX_ENABLE_TIME                      166
 
 volatile uint32_t packets_received = 0;
 volatile uint32_t packets_error = 0;
@@ -174,7 +173,7 @@ inline void TRACK_FRAME(uint16_t frame_id)
 {
     for (int i = 0; i < FRAME_TRACKER_BUFFER_SIZE; i++)
     {
-        if (frame_tracker[i] == 0)
+        if (frame_tracker[i] == FRAME_TRACKER_UNITIALISED_VALUE)
         {
             frame_tracker[i] = frame_id;
             return;
@@ -196,7 +195,8 @@ void timer_callback(uint8_t)
     TIMER_CLEAR();
     TIMER_START();
 
-    memset((void*)frame_tracker, 0, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
+    // reset the frame tracker each window.
+    memset((void*)frame_tracker, FRAME_TRACKER_UNITIALISED_VALUE, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
     memset(&TDMACATRadio::instance->staticFrame, 0, sizeof(TDMACATSuperFrame));
 
     int owner = 1;
@@ -204,11 +204,7 @@ void timer_callback(uint8_t)
     if (tdma_is_synchronised())
         owner = tdma_advance_slot();
     else
-    {
-        TDMA_CAT_Slot slot;
-        slot.slot_identifier = TDMA_CAT_ADVERTISEMENT_SLOT;
-        tdma_synchronise(slot);
-    }
+        tdma_set_current_slot(TDMA_CAT_ADVERTISEMENT_SLOT);
 
     if (owner)
     {
@@ -333,6 +329,8 @@ extern "C" void RADIO_IRQHandler(void)
                 SYNC_TO_FRAME(p->ttl, p->initial_ttl, p->length);
                 process_packet(p, crc, 1);
 
+                tdma_set_current_slot(p->slot_id);
+
                 TDMA_CAT_Slot slot;
                 slot.device_identifier = p->device_id;
                 slot.ttl = p->ttl;
@@ -341,7 +339,6 @@ extern "C" void RADIO_IRQHandler(void)
 
                 if (p->flags & TMDMA_CAT_FRAME_FLAGS_ADVERT)
                 {
-
                     for (int i = 0; i < p->length - (TDMA_CAT_HEADER_SIZE - 1); i++)
                     {
                         slot.slot_identifier = p->payload[i];
@@ -393,8 +390,6 @@ extern "C" void RADIO_IRQHandler(void)
     }
 }
 
-#endif // perido
-
 void manual_poke(TDMACATSuperFrame* p)
 {
     NRF_RADIO->TASKS_DISABLE = 1;
@@ -430,6 +425,7 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cl
     memset(this->txQueue, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
     memset(this->rxQueue, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_QUEUE_SIZE);
     memset(this->bufferPool, 0, sizeof(TDMACATSuperFrame*) * TDMA_CAT_BUFFER_POOL_SIZE);
+    memset((void*)frame_tracker, FRAME_TRACKER_UNITIALISED_VALUE, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
 
     this->rxHead = 0;
     this->rxTail = 0;
@@ -871,69 +867,3 @@ int TDMACATRadio::sendTestResults(uint8_t* data, uint8_t length)
 
 #endif // TEST MODE
 #endif // DIRECT DEBUG
-
-
-// #if TDMA_CAT_TEST_MODE == 1
-//     if (radioState == RADIO_STATE_RECEIVE)
-//     {
-//         if (testRole == Repeater)
-//         {
-//             packets_received++;
-//             if(NRF_RADIO->CRCSTATUS == 1)
-//             {
-//                 if(p->ttl > 0)
-//                 {
-//                     p->ttl--;
-//                     radioState = RADIO_STATE_FORWARD;
-//                     NRF_RADIO->PACKETPTR = (uint32_t)p;
-// #if TDMA_CAT_ASSERT == 1
-//                     HW_ASSERT(0,0);
-// #endif
-//                     NRF_RADIO->EVENTS_DISABLED = 0;
-//                     NRF_RADIO->TASKS_TXEN = 1;
-//                     volatile int i = 250;
-//                     while(i-- > 0);
-//                     NRF_RADIO->TASKS_START = 1;
-
-//                     // back porch here
-
-//                     return;
-//                 }
-//             }
-//             else
-//             {
-//                 packets_error++;
-//             }
-//             NRF_RADIO->PACKETPTR = (uint32_t)p;
-// #if TDMA_CAT_ASSERT == 1
-//             HW_ASSERT(0,0);
-// #endif
-//             NRF_RADIO->EVENTS_DISABLED = 0;
-//             NRF_RADIO->TASKS_RXEN = 1;
-
-//             volatile int i = 250;
-//             while(i-- > 0);
-//             NRF_RADIO->TASKS_START = 1;
-//         }
-//         else
-//         {
-//             if(NRF_RADIO->CRCSTATUS == 0)
-//                 packets_error++;
-
-//             packets_received++;
-//             NRF_RADIO->PACKETPTR = (uint32_t)p;
-// #if TDMA_CAT_ASSERT == 1
-//             HW_ASSERT(0,0);
-// #endif
-//             NRF_RADIO->EVENTS_DISABLED = 0;
-//             NRF_RADIO->TASKS_RXEN = 1;
-
-//             process_packet(p, NRF_RADIO->CRCSTATUS == 1, NRF_RADIO->RSSISAMPLE);
-//             memset(p, 0, sizeof(TDMACATSuperFrame));
-//             volatile int i = 250;
-//             while(i-- > 0);
-//             NRF_RADIO->TASKS_START = 1;
-//         }
-//         return;
-//     }
-// #else
