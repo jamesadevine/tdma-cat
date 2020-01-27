@@ -31,11 +31,11 @@ struct TDMA_CAT_Advertisement {
 
 int tdma_init(uint64_t device_identifier);
 
+void tdma_set_current_slot(int id);
+
 int tdma_set_slot(TDMA_CAT_Slot slot);
 
 TDMA_CAT_Slot tdma_get_current_slot();
-
-int tdma_synchronise(TDMA_CAT_Slot slot);
 
 int tdma_is_synchronised();
 

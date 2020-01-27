@@ -27,9 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 #include "TDMACATRadio.h"
 
-#if TDMA_CAT_DIRECT_DEBUG == 1
-
-#if MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO
+#if (TDMA_CAT_DIRECT_DEBUG == 1 && MICROBIT_RADIO_VERSION == MICROBIT_RADIO_PERIDO)
 
 #include "TDMACAT.h"
 #include "MicroBitComponent.h"
@@ -42,6 +40,7 @@ DEALINGS IN THE SOFTWARE.
 #include "nrf.h"
 
 TDMACATRadio* TDMACATRadio::instance = NULL;
+extern void log_int(const char*, int);
 
 #define TIME_TO_TRANSMIT_BYTE_1MB   8
 #define TX_PACKETS_SIZE             (2 * TDMA_CAT_MAXIMUM_TX_BUFFERS)
@@ -219,7 +218,7 @@ extern "C" void RADIO_IRQHandler(void)
         process_packet(p, true, 0);
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
-#if TDMA_CAT_TEST_MODE == 1
+#if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
 #endif
         NRF_RADIO->EVENTS_DISABLED = 0;
@@ -229,7 +228,6 @@ extern "C" void RADIO_IRQHandler(void)
         return;
     }
 }
-#endif // perido
 
 #pragma GCC pop_options
 
@@ -275,6 +273,8 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cl
     NRF_TIMER0->CC[1] = 0;
     NRF_TIMER0->CC[2] = 0;
     NRF_TIMER0->CC[3] = 0;
+
+    TIMER_STOP();
 
     microbit_seed_random();
 
@@ -599,18 +599,19 @@ void TDMACATRadio::idleTick()
   *
   * @return MICROBIT_OK on success, or MICROBIT_NOT_SUPPORTED if the BLE stack is running.
   */
+
+
 int TDMACATRadio::send(TDMACATSuperFrame* buffer)
 {
     memcpy(&this->staticFrame, buffer, sizeof(TDMACATSuperFrame));
 
+    NRF_RADIO->EVENTS_DISABLED = 0;
     NRF_RADIO->TASKS_DISABLE = 1;
     while (NRF_RADIO->EVENTS_DISABLED == 0);
     NRF_RADIO->EVENTS_DISABLED = 0;
-
-#if TDMA_CAT_TEST_MODE == 1
+#if TDMA_CAT_ASSERT == 1
         HW_ASSERT(0,0);
 #endif
-
     radioState = RADIO_STATE_TRANSMIT;
     NRF_RADIO->PACKETPTR = (uint32_t)&this->staticFrame;
     RADIO_ENABLE_READY_START_SHORT();
