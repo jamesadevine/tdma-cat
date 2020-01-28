@@ -106,8 +106,7 @@ struct TDMACATSuperFrame;
 #define TDMA_CAT_DATAGRAM_NAMESPACE         2
 #define TDMA_CAT_EVENT_NAMESPACE            3
 
-#define TDMA_CAT_FRAME_PROPOSAL_FLAG        0x01
-#define TDMA_CAT_FRAME_KEEP_ALIVE_FLAG      0x02
+#define TDMA_CAT_NEW_SLOT_THRESHOLD         6
 
 #define MICROBIT_RADIO_EVT_DATAGRAM             1
 
@@ -147,6 +146,8 @@ class TDMACATRadio : public MicroBitComponent
 
     int queueTxFrame(TDMACATSuperFrame* s);
     int queueRxFrame(TDMACATSuperFrame* rx);
+
+    inline int queueSize(uint8_t* tail, uint8_t*head);
 
     TDMACATSuperFrame* peakRxQueue();
     TDMACATSuperFrame* peakTxQueue();

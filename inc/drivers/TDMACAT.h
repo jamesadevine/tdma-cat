@@ -13,7 +13,7 @@
 #define TDMA_CAT_ADVERTISEMENT_SLOT     0
 #define TDMA_CAT_UNITIALISED_SLOT       -1
 
-#define TDMA_SLOT_FLAGS_ADVERTISED      0x1
+#define TDMA_SLOT_FLAGS_ADVERTISE       0x1
 
 struct TDMACATSuperFrame;
 
@@ -45,9 +45,11 @@ int tdma_advert_required();
 
 int tdma_advance_slot();
 
-TDMA_CAT_Slot tdma_get_slot(uint32_t slot_identifier);
+int tdma_count_slots();
 
-int tdma_slots_till_next_tx();
+void tdma_obtain_slot();
+
+TDMA_CAT_Slot tdma_get_slot(uint32_t slot_identifier);
 
 int tdma_fill_advertising_frame(TDMACATSuperFrame*);
 

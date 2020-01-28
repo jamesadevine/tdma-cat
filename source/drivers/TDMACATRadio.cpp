@@ -39,6 +39,7 @@ DEALINGS IN THE SOFTWARE.
 #include "MicroBitHeapAllocator.h"
 #include "nrf.h"
 
+extern void log_int(const char*, int);
 TDMACATRadio* TDMACATRadio::instance = NULL;
 
 #define TIME_TO_TRANSMIT_BYTE_1MB           8
@@ -97,9 +98,6 @@ volatile uint8_t tdmaState = TDMA_STATE_EXPLORER;
 extern void set_transmission_reception_gpio(int);
 extern void process_packet(TDMACATSuperFrame* p, bool, int);
 
-#pragma GCC push_options
-#pragma GCC optimize ("O0")
-
 volatile int hw_state = 0;
 #define HW_ASSERT(expected_state, panic_num) {\
                                         hw_state = NRF_RADIO->STATE;\
@@ -121,6 +119,20 @@ inline void TIMER_SET_CC_IRQ(uint8_t channel, int value)
 {
     NRF_TIMER0->CC[channel] = value;
     NRF_TIMER0->INTENSET |= (1 << (TIMER_INTENSET_COMPARE0_Pos + channel));
+}
+inline void TIMER_ENABLE_IRQ()
+{
+    NVIC_EnableIRQ(TIMER0_IRQn);
+}
+
+inline void TIMER_DISABLE_IRQ()
+{
+    NVIC_DisableIRQ(TIMER0_IRQn);
+}
+
+inline void TIMER_SET_PRIORITY(int priority)
+{
+    NVIC_SetPriority(TIMER0_IRQn, priority);
 }
 
 inline void TIMER_START()
@@ -186,25 +198,38 @@ inline void SYNC_TO_FRAME(int ttl, int initial_ttl, int packet_size)
     uint32_t t = TIMER_GET_CC(TIMER_CC_TIMESTAMP);
     uint8_t hops = initial_ttl - ttl;
     uint32_t time_to_arrive = (hops * ((packet_size * TIME_TO_TRANSMIT_BYTE_1MB) + RX_TX_DISABLE_TIME + TX_ENABLE_TIME));
-    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, t + ((TDMA_CAT_SLOT_SIZE_US - time_to_arrive) - 2000));
+    uint32_t new_cc_tdma = t + ((TDMA_CAT_SLOT_SIZE_US - time_to_arrive) - 2000);
+    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, new_cc_tdma);
 }
 
 void timer_callback(uint8_t)
 {
-    TIMER_STOP();
     TIMER_CLEAR();
-    TIMER_START();
 
     // reset the frame tracker each window.
-    memset((void*)frame_tracker, FRAME_TRACKER_UNITIALISED_VALUE, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
-    memset(&TDMACATRadio::instance->staticFrame, 0, sizeof(TDMACATSuperFrame));
+    // memset((void*)frame_tracker, FRAME_TRACKER_UNITIALISED_VALUE, sizeof(uint16_t) * FRAME_TRACKER_BUFFER_SIZE);
+    // memset(&TDMACATRadio::instance->staticFrame, 0, sizeof(TDMACATSuperFrame));
+
+    // do we need to ask for more slots?
+    // int our_slots = tdma_count_slots();
+
+    // if (our_slots == 0 || TDMACATRadio::instance->queueSize(&TDMACATRadio::instance->txTail, &TDMACATRadio::instance->txHead) > TDMA_CAT_NEW_SLOT_THRESHOLD)
+    //     tdma_obtain_slot();
 
     int owner = 1;
 
+    int synced = tdma_is_synchronised();
+
     if (tdma_is_synchronised())
+    {
         owner = tdma_advance_slot();
+        process_packet(NULL, true, 5);
+    }
     else
+    {
         tdma_set_current_slot(TDMA_CAT_ADVERTISEMENT_SLOT);
+        process_packet(NULL, true, 6);
+    }
 
     if (owner)
     {
@@ -218,7 +243,6 @@ void timer_callback(uint8_t)
                 tdma_fill_advertising_frame(&TDMACATRadio::instance->staticFrame);
                 needToTransmit = true;
             }
-
         }
         // anything to send?
         else if (TDMACATRadio::instance->peakTxQueue())
@@ -250,13 +274,15 @@ void timer_callback(uint8_t)
             // set packet pointer!!
             NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
-            // random backoff
-            TIMER_SET_CC(TIMER_CC_TX_RX, 2000 + microbit_random(TDMA_CAT_SLOT_SIZE_US));
-            TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
-
+            PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
             PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
             PPI_ENABLE_CHAN(PPI_CHAN_END);
-            PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
+
+            RADIO_ENABLE_READY_START_SHORT();
+
+            // random backoff
+            TIMER_SET_CC(TIMER_CC_TX_RX, 2000); // + microbit_random(TDMA_CAT_SLOT_SIZE_US));
+            TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
             return;
         }
     }
@@ -267,13 +293,18 @@ void timer_callback(uint8_t)
 
     NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
-    TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
-    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
-
     PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
     PPI_ENABLE_CHAN(PPI_CHAN_END);
     PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
+
+    RADIO_ENABLE_READY_START_SHORT();
+
+    TIMER_SET_CC(TIMER_CC_TX_RX, 2000);
+    TIMER_SET_CC_IRQ(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 }
+
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
 
 extern "C" void RADIO_IRQHandler(void)
 {
@@ -283,7 +314,6 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_FORWARD)
     {
         radioState = RADIO_STATE_RECEIVE;
-        memset(p, 0, sizeof(TDMACATSuperFrame));
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
 #if TDMA_CAT_ASSERT == 1
@@ -322,7 +352,7 @@ extern "C" void RADIO_IRQHandler(void)
             packets_received++;
 
             // check if we've seen it
-            if (!FRAME_SEEN(p->frame_id))
+            if (FRAME_SEEN(p->frame_id) == 0)
             {
                 // track it to prevent duplication.
                 TRACK_FRAME(p->frame_id);
@@ -388,22 +418,6 @@ extern "C" void RADIO_IRQHandler(void)
         packets_transmitted++;
         return;
     }
-}
-
-void manual_poke(TDMACATSuperFrame* p)
-{
-    NRF_RADIO->TASKS_DISABLE = 1;
-    while (NRF_RADIO->EVENTS_DISABLED == 0);
-    NRF_RADIO->EVENTS_DISABLED = 0;
-
-#if TDMA_CAT_TEST_MODE == 1
-        HW_ASSERT(0,0);
-#endif
-
-    radioState = RADIO_STATE_TRANSMIT;
-    NRF_RADIO->PACKETPTR = (uint32_t)p;
-    RADIO_ENABLE_READY_START_SHORT();
-    NRF_RADIO->TASKS_TXEN = 1;
 }
 
 #pragma GCC pop_options
@@ -585,6 +599,11 @@ int TDMACATRadio::queueTxFrame(TDMACATSuperFrame* s)
     return res;
 }
 
+int TDMACATRadio::queueSize(uint8_t* tail, uint8_t* head)
+{
+    return (*head > *tail) ? (*head - *tail) : ((*head + TDMA_CAT_QUEUE_SIZE) - *tail);
+}
+
 TDMACATSuperFrame* TDMACATRadio::popTxQueue()
 {
     return getBufferFromQueue(this->txQueue, &this->txTail, &this->txHead);
@@ -690,7 +709,9 @@ int TDMACATRadio::enable()
     // disable after 2 seconds, and perform application tasks
     // TIMER_SET_CC(TIMER_CC_DISABLE, 2000000);
     TIMER_SET_CC_IRQ(TIMER_CC_TDMA, 2000000);
-    // TIMER_START();
+    TIMER_SET_PRIORITY(1);
+    TIMER_ENABLE_IRQ();
+    TIMER_START();
 
     NRF_RADIO->TASKS_RXEN = 1;
 

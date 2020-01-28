@@ -3,10 +3,14 @@
 #include "TDMACATRadio.h"
 
 static TDMA_CAT_Slot table[TDMA_CAT_TABLE_SIZE];
-static int current_slot = TDMA_CAT_UNITIALISED_SLOT;
+static volatile int current_slot = TDMA_CAT_UNITIALISED_SLOT;
+
+extern void log_int(const char*, int);
 
 int tdma_init(uint64_t device_identifier)
 {
+    current_slot = TDMA_CAT_UNITIALISED_SLOT;
+    log_int("BF", current_slot);
     memset(&table, 0, sizeof(TDMA_CAT_Slot) * TDMA_CAT_TABLE_SIZE);
 
     TDMA_CAT_Slot adv;
@@ -19,11 +23,17 @@ int tdma_init(uint64_t device_identifier)
 
     table[TDMA_CAT_ADVERTISEMENT_SLOT] = adv;
 
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+        table[i].expiration = 0xff;
+
+    log_int("AF", current_slot);
+
     return MICROBIT_OK;
 }
 
 int tdma_set_slot(TDMA_CAT_Slot slot)
 {
+    log_int("SS", current_slot);
     uint16_t index = slot.slot_identifier;
     if (index > TDMA_CAT_TABLE_SIZE - 1 || index == TDMA_CAT_ADVERTISEMENT_SLOT)
         return MICROBIT_NO_RESOURCES;
@@ -32,16 +42,19 @@ int tdma_set_slot(TDMA_CAT_Slot slot)
         return MICROBIT_NO_RESOURCES;
 
     table[index] = slot;
+    log_int("SSO", current_slot);
     return MICROBIT_OK;
 }
 
 TDMA_CAT_Slot tdma_get_slot(uint32_t slot_identifier)
 {
+    log_int("GS", current_slot);
     return table[slot_identifier];
 }
 
 TDMA_CAT_Slot tdma_get_current_slot()
 {
+    log_int("GCS", current_slot);
     TDMA_CAT_Slot blank;
     blank.expiration = 255;
 
@@ -54,6 +67,7 @@ TDMA_CAT_Slot tdma_get_current_slot()
 void tdma_set_current_slot(int slot_id)
 {
     current_slot = slot_id;
+    log_int("SCS", current_slot);
 }
 
 /**
@@ -61,52 +75,63 @@ void tdma_set_current_slot(int slot_id)
  **/
 int tdma_advance_slot()
 {
+    log_int("ADVA", current_slot);
     current_slot = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
-    return (table[current_slot].ttl == 0) ? 1 : 0;
+    return (table[current_slot].ttl == 0 && !(table[current_slot].flags &TDMA_SLOT_FLAGS_ADVERTISE)) ? 1 : 0;
 }
 
 int tdma_is_synchronised()
 {
-    return current_slot != TDMA_CAT_UNITIALISED_SLOT;
+    log_int("IS", current_slot);
+    return !(current_slot == TDMA_CAT_UNITIALISED_SLOT);
 }
 
 int tdma_is_advertising_slot()
 {
+    log_int("ADVS", current_slot);
     return current_slot == TDMA_CAT_ADVERTISEMENT_SLOT;
+}
+
+int tdma_count_slots()
+{
+    log_int("COU", current_slot);
+    int count = 0;
+
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+        if (table[i].ttl ==  0)
+            count++;
+
+    return count;
 }
 
 int tdma_advert_required()
 {
+    log_int("ADVR", current_slot);
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
-        if (table[i].ttl ==  0 && !(table[i].flags & TDMA_SLOT_FLAGS_ADVERTISED))
+        if (table[i].ttl ==  0 && table[i].flags & TDMA_SLOT_FLAGS_ADVERTISE)
             return 1;
 
     return 0;
 }
 
-/**
- * Returns the number of slots until this device must transmit.
- **/
-int tdma_slots_till_next_tx()
+void tdma_obtain_slot()
 {
-    int i = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
-    int slot_counter = 0;
-
-    while (i != current_slot)
-    {
-        slot_counter++;
-
-        if (table[i].ttl == 0)
-            return slot_counter;
-
-        i = (i + 1) % TDMA_CAT_TABLE_SIZE;
-    }
-
-    return MICROBIT_NO_RESOURCES;
+    log_int("obt", current_slot);
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+        if (table[i].expiration ==  0xff)
+        {
+            table[i].device_identifier = table[TDMA_CAT_ADVERTISEMENT_SLOT].device_identifier;
+            table[i].slot_identifier = i;
+            table[i].expiration = 0xff;
+            table[i].ttl = 0;
+            table[i].flags = TDMA_SLOT_FLAGS_ADVERTISE;
+            return;
+        }
 }
 
 int tdma_fill_advertising_frame(TDMACATSuperFrame* frame)
 {
+    log_int("ADVF", current_slot);
     uint8_t* slots = frame->payload;
     int advertIndex = 0;
 
@@ -120,9 +145,9 @@ int tdma_fill_advertising_frame(TDMACATSuperFrame* frame)
     frame->flags = TMDMA_CAT_FRAME_FLAGS_ADVERT;
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
-        if (table[i].ttl ==  0 && !(table[i].flags & TDMA_SLOT_FLAGS_ADVERTISED))
+        if (table[i].ttl ==  0 && (table[i].flags & TDMA_SLOT_FLAGS_ADVERTISE))
         {
-            table[i].flags &= ~(TDMA_SLOT_FLAGS_ADVERTISED);
+            table[i].flags &= ~(TDMA_SLOT_FLAGS_ADVERTISE);
             slots[advertIndex++] = i;
         }
 

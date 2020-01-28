@@ -215,7 +215,7 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_TRANSMIT)
     {
         radioState = RADIO_STATE_RECEIVE;
-        process_packet(p, true, 0);
+        process_packet(p, true, 1);
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
         while(NRF_RADIO->EVENTS_DISABLED == 0);
 #if TDMA_CAT_ASSERT == 1
