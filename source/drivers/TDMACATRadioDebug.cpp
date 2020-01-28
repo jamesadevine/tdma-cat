@@ -239,7 +239,7 @@ extern "C" void RADIO_IRQHandler(void)
   * @note This class is demand activated, as a result most resources are only
   *       committed if send/recv or event registrations calls are made.
   */
-TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cloud(*this, TDMA_CAT_CLOUD_NAMESPACE), datagram(*this, TDMA_CAT_DATAGRAM_NAMESPACE), event(*this, TDMA_CAT_EVENT_NAMESPACE)
+TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer)
 {
     this->id = id;
     this->status = 0;

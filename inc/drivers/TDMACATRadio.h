@@ -154,9 +154,9 @@ class TDMACATRadio : public MicroBitComponent
     TDMACATSuperFrame* popTxQueue();
 
     LowLevelTimer&          timer;
-    PeridoRadioCloud        cloud;          // A simple REST handling service.
-    PeridoRadioDatagram     datagram;       // A simple datagram handling service.
-    PeridoRadioEvent        event;          // A simple event handling service.
+    // PeridoRadioCloud        cloud;          // A simple REST handling service.
+    // PeridoRadioDatagram     datagram;       // A simple datagram handling service.
+    // PeridoRadioEvent        event;          // A simple event handling service.
 
     // a fifo array of received packets
     // the array can hold a maximum of TDMA_CAT_QUEUE_SIZE - 1 packets

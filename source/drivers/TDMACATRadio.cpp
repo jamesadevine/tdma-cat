@@ -57,10 +57,6 @@ volatile uint32_t packets_forwarded = 0;
 
 volatile uint16_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 
-volatile uint8_t  tx_packets_head = 0;
-volatile uint8_t  tx_packets_tail = 0;
-volatile uint32_t tx_packets[TX_PACKETS_SIZE] = { 0 };
-
 /**
   * Driver configuration flags
   **/
@@ -430,7 +426,7 @@ extern "C" void RADIO_IRQHandler(void)
   * @note This class is demand activated, as a result most resources are only
   *       committed if send/recv or event registrations calls are made.
   */
-TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer), cloud(*this, TDMA_CAT_CLOUD_NAMESPACE), datagram(*this, TDMA_CAT_DATAGRAM_NAMESPACE), event(*this, TDMA_CAT_EVENT_NAMESPACE)
+TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer)
 {
     this->id = id;
     this->status = 0;

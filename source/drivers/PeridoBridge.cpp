@@ -74,7 +74,9 @@ void PeridoBridge::queueTestResponse()
     LOG_NUM(buf->namespace_id);
     LOG_NUM(((DataPacket*)buf->payload)->request_id);
     // cloud data will be deleted automatically.
+#if IGNORE_FUTURE_PROBLEMS == 0
     radio.cloud.addToTxQueue(cloudData);
+#endif
 }
 
 void PeridoBridge::sendHelloPacket()
@@ -145,7 +147,7 @@ void PeridoBridge::sendSerialPacket(uint16_t len)
 void PeridoBridge::onRadioPacket(MicroBitEvent)
 {
     CloudDataItem* r = NULL;
-
+#if IGNORE_FUTURE_PROBLEMS == 0
     while((r = radio.cloud.recvRaw()))
     {
         TDMACATSuperFrame* packet = r->packet;
@@ -180,7 +182,7 @@ void PeridoBridge::onRadioPacket(MicroBitEvent)
 
         this->packetCount++;
     }
-
+#endif
     display.clear();
 
     // big smile
@@ -292,7 +294,9 @@ void PeridoBridge::onSerialPacket(MicroBitEvent)
         cloudData->retry_count = 0;
 
         // cloud data will be deleted automatically.
+#if IGNORE_FUTURE_PROBLEMS == 0
         radio.cloud.addToTxQueue(cloudData);
+#endif
     }
 }
 
@@ -308,8 +312,10 @@ void PeridoBridge::enable()
 
     sendHelloPacket();
 
+#if IGNORE_FUTURE_PROBLEMS == 0
     // listen to everything.
     radio.cloud.setBridgeMode(true);
+#endif
 }
 
 PeridoBridge::PeridoBridge(TDMACATRadio& r, MicroBitSerial& s, MicroBitMessageBus& b, MicroBitDisplay& display) : radio(r), serial(s), display(display)
