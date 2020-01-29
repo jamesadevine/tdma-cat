@@ -254,6 +254,9 @@ void timer_callback(uint8_t)
 
         if (tdma_is_advertising_slot())
         {
+            // update table expiration every window.
+            tdma_expiration_tick();
+
             // do we need to send an advert?
             if (tdma_advert_required())
             {
@@ -289,8 +292,6 @@ void timer_callback(uint8_t)
             // it's our slot but we have nothing to send. Let's send a keep alive message
             // to ensure that we do not lose our slot.
             TDMACATRadio::instance->staticFrame.frame_id = 0;
-            TDMACATRadio::instance->staticFrame.ttl = 0;
-            TDMACATRadio::instance->staticFrame.initial_ttl = 0;
             TDMACATRadio::instance->staticFrame.flags = TMDMA_CAT_FRAME_FLAGS_DONE;
             TDMACATRadio::instance->staticFrame.length = TDMA_CAT_HEADER_SIZE - 1;
             TDMACATRadio::instance->staticFrame.device_id = microbit_serial_number();
@@ -300,6 +301,11 @@ void timer_callback(uint8_t)
         {
             tdmaState = TDMA_STATE_OWNER;
             radioState = RADIO_STATE_TRANSMIT;
+
+            int ttl = 1 + tdma_get_distance();
+
+            TDMACATRadio::instance->staticFrame.ttl = ttl;
+            TDMACATRadio::instance->staticFrame.initial_ttl = ttl;
             TDMACATRadio::instance->staticFrame.slot_id = tdma_current_slot_idx();
 
             // set packet pointer!!
@@ -390,7 +396,7 @@ extern "C" void RADIO_IRQHandler(void)
 
                 TDMA_CAT_Slot slot;
                 slot.device_identifier = p->device_id;
-                slot.ttl = p->ttl;
+                slot.distance = p->initial_ttl - p->ttl;
                 slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
                 slot.flags = 0;
 
@@ -403,7 +409,7 @@ extern "C" void RADIO_IRQHandler(void)
                         slot.slot_identifier = p->payload[i];
                         int ret;
 
-                        // if this is an error frame,
+                        // error frame? clear the slots in the payload
                         if (error)
                             tdma_clear_slot(p->payload[i]);
                         else

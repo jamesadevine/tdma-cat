@@ -19,20 +19,21 @@ int tdma_init(uint64_t device_identifier)
 
     adv.device_identifier = device_identifier;
     adv.slot_identifier = TDMA_CAT_ADVERTISEMENT_SLOT;
-    adv.expiration = 0xff;
-    adv.ttl = 0;
+    adv.expiration = TDMA_CAT_NEVER_EXPIRE;
+    adv.distance = 0;
     adv.flags = TDMA_SLOT_FLAGS_OWNER;
 
     table[TDMA_CAT_ADVERTISEMENT_SLOT] = adv;
 
     TDMA_CAT_Slot init;
     init.expiration = 0;
-    init.ttl = 0;
+    init.distance = 0;
     init.flags = TDMA_SLOT_FLAGS_UNITIALISED;
     init.slot_identifier = 0;
     init.device_identifier = 0;
 
     adv_slot_match = microbit_random(TDMA_CAT_ADV_SLOT_MATCH_MAX);
+    adv_slot_counter = 0;
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
         table[i] = init;
@@ -115,7 +116,6 @@ int tdma_advance_slot()
 
 int tdma_is_synchronised()
 {
-    log_int("IS",current_slot);
     return !(current_slot == TDMA_CAT_UNITIALISED_SLOT);
 }
 
@@ -156,12 +156,19 @@ int tdma_renegotiation_required()
 {
     int required = 0;
     int total_errors = 0;
+    int active_slots = 0;
     int error_avg = 0;
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
-        total_errors += table[i].errors;
+    {
+        if (table[i].flags & TDMA_SLOT_FLAGS_UNITIALISED)
+            continue;
 
-    error_avg /= TDMA_CAT_TABLE_SIZE - 1;
+        active_slots++;
+        total_errors += table[i].errors;
+    }
+
+    error_avg = total_errors / active_slots;
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
     {
@@ -174,7 +181,6 @@ int tdma_renegotiation_required()
         table[i].errors = 0;
     }
 
-
     return required;
 }
 
@@ -186,11 +192,9 @@ void tdma_obtain_slot()
     TDMA_CAT_Slot newSlot;
 
     newSlot.device_identifier = table[TDMA_CAT_ADVERTISEMENT_SLOT].device_identifier;
-    newSlot.expiration = 0xff;
-    newSlot.ttl = 0;
+    newSlot.expiration = TDMA_CAT_NEVER_EXPIRE;
+    newSlot.distance = 0;
     newSlot.flags = TDMA_SLOT_FLAGS_ADVERTISE | TDMA_SLOT_FLAGS_OWNER;
-
-    log_int("OBTT",0);
 
     while (reallocCount < 10)
     {
@@ -199,7 +203,6 @@ void tdma_obtain_slot()
         {
             newSlot.slot_identifier = idx;
             table[idx] = newSlot;
-            log_int("OBT",newSlot.slot_identifier);
             return;
         }
 
@@ -253,11 +256,40 @@ int tdma_fill_renogotiation_frame(TDMACATSuperFrame* frame)
         {
             table[i].flags &= ~(TDMA_SLOT_FLAGS_ERROR);
             slots[advertIndex++] = i;
-            log_int("TDMA", i);
         }
 
     frame->length = advertIndex + TDMA_CAT_HEADER_SIZE - 1;
 
     return MICROBIT_OK;
+}
+
+void tdma_expiration_tick()
+{
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+    {
+        if (table[i].flags & TDMA_FLAGS_UNITIALISED || table[i].expiration == TDMA_CAT_NEVER_EXPIRE)
+            continue;
+
+        table[i].expiration--;
+
+        if (table[i].expiration == 0)
+            table[i].flags = TDMA_FLAGS_UNITIALISED;
+    }
+}
+
+int tdma_get_distance()
+{
+    int biggest_distance = -1;
+
+    for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
+    {
+        if (table[i].flags & TDMA_FLAGS_UNITIALISED || table[i].expiration == TDMA_CAT_NEVER_EXPIRE)
+            continue;
+
+        if (table[i].distance > biggest_distance)
+            biggest_distance = table[i].distance;
+    }
+
+    return (biggest_distance < 0) ? 0 : biggest_distance;
 }
 

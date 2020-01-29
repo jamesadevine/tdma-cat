@@ -13,6 +13,7 @@
 #define TDMA_CAT_ADVERTISEMENT_SLOT     0
 #define TDMA_CAT_UNITIALISED_SLOT       -1
 #define TDMA_CAT_ADV_SLOT_MATCH_MAX     6
+#define TDMA_CAT_NEVER_EXPIRE           0xff
 
 #define TDMA_SLOT_FLAGS_ADVERTISE       0x1
 #define TDMA_SLOT_FLAGS_UNITIALISED     0x2
@@ -26,7 +27,7 @@ struct TDMA_CAT_Slot {
     uint8_t slot_identifier;
     uint8_t errors;
     uint8_t expiration;
-    uint8_t ttl:4; uint8_t flags:4;
+    uint8_t distance:4; uint8_t flags:4;
 };
 
 struct TDMA_CAT_Advertisement {
@@ -67,5 +68,9 @@ int tdma_rx_error();
 int tdma_fill_advertising_frame(TDMACATSuperFrame*);
 
 int tdma_fill_renogotiation_frame(TDMACATSuperFrame*);
+
+void tdma_expiration_tick();
+
+int tdma_get_distance();
 
 #endif
