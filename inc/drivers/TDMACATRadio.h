@@ -112,6 +112,7 @@ struct TDMACATSuperFrame;
 
 #define TMDMA_CAT_FRAME_FLAGS_ADVERT        0x01
 #define TMDMA_CAT_FRAME_FLAGS_DONE          0x02
+#define TMDMA_CAT_FRAME_FLAGS_ERROR         0x04
 
 struct TDMACATSuperFrame
 {
