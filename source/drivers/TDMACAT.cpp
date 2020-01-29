@@ -5,6 +5,9 @@
 static TDMA_CAT_Slot table[TDMA_CAT_TABLE_SIZE];
 static volatile int current_slot = TDMA_CAT_UNITIALISED_SLOT;
 
+static volatile int adv_slot_match = 0;
+static volatile int adv_slot_counter = 0;
+
 extern void log_int(const char*, int);
 
 int tdma_init(uint64_t device_identifier)
@@ -28,6 +31,8 @@ int tdma_init(uint64_t device_identifier)
     init.flags = TDMA_SLOT_FLAGS_UNITIALISED;
     init.slot_identifier = 0;
     init.device_identifier = 0;
+
+    adv_slot_match = microbit_random(TDMA_CAT_ADV_SLOT_MATCH_MAX);
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
         table[i] = init;
@@ -91,7 +96,21 @@ void tdma_set_current_slot(int slot_id)
 int tdma_advance_slot()
 {
     current_slot = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
-    return (table[current_slot].flags & TDMA_SLOT_FLAGS_OWNER && !(table[current_slot].flags & TDMA_SLOT_FLAGS_ADVERTISE)) ? 1 : 0;
+
+    if (current_slot == TDMA_CAT_ADVERTISEMENT_SLOT)
+    {
+        adv_slot_counter++;
+
+        if (current_slot % adv_slot_match == 0)
+        {
+            adv_slot_match = microbit_random(TDMA_CAT_ADV_SLOT_MATCH_MAX);
+            return 1;
+        }
+    }
+    else if (table[current_slot].flags & TDMA_SLOT_FLAGS_OWNER && !(table[current_slot].flags & TDMA_SLOT_FLAGS_ADVERTISE))
+        return 1;
+
+    return 0;
 }
 
 int tdma_is_synchronised()

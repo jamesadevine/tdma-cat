@@ -403,6 +403,7 @@ extern "C" void RADIO_IRQHandler(void)
                         slot.slot_identifier = p->payload[i];
                         int ret;
 
+                        // if this is an error frame,
                         if (error)
                             tdma_clear_slot(p->payload[i]);
                         else
@@ -437,6 +438,7 @@ extern "C" void RADIO_IRQHandler(void)
         }
         else
         {
+            // increments the error counter for current_slot
             tdma_rx_error();
             packets_error++;
         }
