@@ -4,7 +4,7 @@
 #include "MicroBitConfig.h"
 
 #define TDMA_CAT_WINDOW_SIZE_MS         1000
-#define TDMA_CAT_SLOT_COUNT             4
+#define TDMA_CAT_SLOT_COUNT             50
 #define TDMA_CAT_SLOT_SIZE_MS           (TDMA_CAT_WINDOW_SIZE_MS/TDMA_CAT_SLOT_COUNT)
 #define TDMA_CAT_SLOT_SIZE_US           (TDMA_CAT_SLOT_SIZE_MS * 1000)
 #define TDMA_CAT_TABLE_SIZE             TDMA_CAT_SLOT_COUNT
@@ -51,6 +51,8 @@ TDMA_CAT_Slot tdma_get_current_slot();
 
 int tdma_is_synchronised();
 
+int tdma_is_owner();
+
 int tdma_is_advertising_slot();
 
 int tdma_advert_required();
@@ -69,7 +71,7 @@ int tdma_fill_advertising_frame(TDMACATSuperFrame*);
 
 int tdma_fill_renogotiation_frame(TDMACATSuperFrame*);
 
-void tdma_expiration_tick();
+void tdma_window_tick();
 
 int tdma_get_distance();
 
