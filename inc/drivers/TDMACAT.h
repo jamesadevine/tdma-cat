@@ -55,6 +55,8 @@ int tdma_is_owner();
 
 int tdma_is_advertising_slot();
 
+int tdma_slot_is_occupied();
+
 int tdma_advert_required();
 
 int tdma_renegotiation_required();

@@ -47,8 +47,9 @@ TDMACATRadio* TDMACATRadio::instance = NULL;
 #define FRAME_TRACKER_BUFFER_SIZE           20
 #define FRAME_TRACKER_UNINITIALISED_VALUE     255
 
-#define RX_TX_DISABLE_TIME                  3
-#define TX_RX_ENABLE_TIME                   145
+#define RADIO_DISABLE_TIME                  3
+#define RADIO_TX_TIME                       145
+#define RADIO_DISABLE_TOLERANCE             100
 
 // 4 bytes address, 1 prefix, 1 pre amble, 2 crc
 #define RADIO_ON_AIR_BYTES                  8
@@ -84,7 +85,7 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 #define PPI_CHAN_END        27
 
 #define TIMER_CC_TX_RX              0
-#define TIMER_CC_CLEAR_COUNTER      1
+#define TIMER_CC_DISABLE_RADIO      1
 #define TIMER_CC_TIMESTAMP          2
 #define TIMER_CC_TDMA               3
 
@@ -222,44 +223,41 @@ inline void TRACK_FRAME(uint16_t frame_id)
     }
 }
 
-inline void SYNC_TO_FRAME(int ttl, int initial_ttl, int packet_size)
+inline void SYNC_TO_FRAME(uint32_t t_end, int ttl, int initial_ttl, int tx_time)
 {
-    uint32_t t_end = TIMER_GET_CC(TIMER_CC_TIMESTAMP);
     uint8_t hops = initial_ttl - ttl;
-    uint32_t packet_time = (packet_size + RADIO_ON_AIR_BYTES) * TIME_TO_TRANSMIT_BYTE_1MB;
-    uint32_t time_to_arrive = packet_time + (hops * (packet_time + RX_TX_DISABLE_TIME + TX_RX_ENABLE_TIME));
-
-    int t_start = t_end - time_to_arrive;
+    uint32_t time_to_arrive = tx_time + (hops * (tx_time + RADIO_DISABLE_TIME + RADIO_TX_TIME));
+    uint32_t t_start = t_end - time_to_arrive;
 
     if (tdmaState == TDMA_STATE_EXPLORER)
-    {
         TIMER_SET_CC(TIMER_CC_TDMA, t_start + (TDMA_CAT_SLOT_SIZE_US - TDMA_PREPARATION_OFFSET_US));
-        // TIMER_SET_CC(TIMER_CC_CLEAR_COUNTER, t_start + TDMA_PREPARATION_OFFSET_US);
-        // TIMER_ENABLE_CLEAR_ON_COMPARE(TIMER_CC_CLEAR_COUNTER);
-    }
     else
     {
-        int error = t_end - time_to_arrive - TDMA_PREPARATION_OFFSET_US;
+        int error = t_start - TDMA_PREPARATION_OFFSET_US;
         sync_drift = (sync_drift + error) / 2;
         SERIAL_DEBUG->printf("E: %d\r\n",error);
     }
+}
+
+inline void SET_RADIO_DISABLE(uint32_t t_end, int ttl, uint32_t tx_time)
+{
+    TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, t_end + (ttl * (tx_time + RADIO_DISABLE_TIME + RADIO_TX_TIME)) + RADIO_DISABLE_TOLERANCE);
+    PPI_ENABLE_CHAN(PPI_CHAN_DIS);
 }
 
 extern void toggle_gpio();
 void timer_callback(uint8_t)
 {
     // go to sleep if slot is empty
-    toggle_gpio();
-    PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
-    PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
-
-    if (tdmaState == TDMA_STATE_EXPLORER)
-        TIMER_CLEAR();
-
-    TIMER_SET_CC(TIMER_CC_CLEAR_COUNTER, TDMA_CAT_SLOT_SIZE_US);
+    TIMER_CLEAR();
     TIMER_SET_CC(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
 
-    TIMER_ENABLE_CLEAR_ON_COMPARE(TIMER_CC_CLEAR_COUNTER);
+    toggle_gpio();
+
+    PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
+    PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
+    PPI_DISABLE_CHAN(PPI_CHAN_DIS);
+
     RADIO_DISABLE();
 
     // reset the frame tracker each window.
@@ -292,7 +290,7 @@ void timer_callback(uint8_t)
     // log_int("advr", tdma_advert_required());
     // log_int("qs", TDMACATRadio::instance->queueSize(&TDMACATRadio::instance->txTail, &TDMACATRadio::instance->txHead));
 
-    int wakeUpTime = TDMA_PREPARATION_OFFSET_US - TX_RX_ENABLE_TIME;
+    int wakeUpTime = TDMA_PREPARATION_OFFSET_US - RADIO_TX_TIME;
 
     if (owner)
     {
@@ -302,7 +300,6 @@ void timer_callback(uint8_t)
         {
             int compensation = -(sync_drift / 10);
             sync_drift = 0;
-            TIMER_SET_CC(TIMER_CC_CLEAR_COUNTER, TDMA_CAT_SLOT_SIZE_US - (compensation * 5));
             TIMER_SET_CC(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US - (compensation * 5));
 
             // update table expiration every window.
@@ -355,8 +352,7 @@ void timer_callback(uint8_t)
             radioState = RADIO_STATE_TRANSMIT;
             // SERIAL_DEBUG->printf("T %d %d\r\n",tdma_current_slot_idx(),our_slots);
 
-            int ttl = 1;
-            // int ttl = 1 + tdma_get_distance();
+            int ttl = 1 + tdma_get_distance();
 
             TDMACATRadio::instance->staticFrame.frame_id = 0;
             TDMACATRadio::instance->staticFrame.flags |= TMDMA_CAT_FRAME_FLAGS_DONE;
@@ -376,21 +372,24 @@ void timer_callback(uint8_t)
         }
     }
 
-    // if we don't need to transmit, we drop through into receive mode.
-    tdmaState = TDMA_STATE_REPEATER;
-    radioState = RADIO_STATE_RECEIVE;
+    // if we don't need to transmit, we drop through into receive mode
+    // only if the slot is occupied.
+    if (tdma_slot_is_occupied())
+    {
+        tdmaState = TDMA_STATE_REPEATER;
+        radioState = RADIO_STATE_RECEIVE;
 
-    wakeUpTime -= TDMA_GRACE_PERIOD_US;
+        wakeUpTime -= TDMA_GRACE_PERIOD_US;
 
-    NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
+        NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
-    TIMER_SET_CC(TIMER_CC_TX_RX, wakeUpTime);
+        TIMER_SET_CC(TIMER_CC_TX_RX, wakeUpTime);
 
-    RADIO_ENABLE_READY_START_SHORT();
+        RADIO_ENABLE_READY_START_SHORT();
 
-    PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
-    PPI_ENABLE_CHAN(PPI_CHAN_END);
-    // log_int("r",wakeUpTime);
+        PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
+        PPI_ENABLE_CHAN(PPI_CHAN_END);
+    }
 }
 
 #pragma GCC push_options
@@ -445,7 +444,7 @@ extern "C" void RADIO_IRQHandler(void)
 
             TDMA_CAT_Slot slot;
             slot.device_identifier = p->device_id;
-            slot.distance = p->initial_ttl - p->ttl;
+            slot.distance = p->initial_ttl - (p->ttl + 1);
             slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
             slot.flags = 0;
 
@@ -466,17 +465,6 @@ extern "C" void RADIO_IRQHandler(void)
                             tdma_clear_slot(p->payload[i]);
                         else
                             tdma_set_slot(slot);
-
-                        if (ret < 0)
-                        {
-                            log_int("ACS",tdma_current_slot_idx());
-                            log_int("ASI",p->slot_id);
-                            log_int("ADI",(uint32_t)p->device_id);
-                            log_int("AF",(uint32_t)p->flags);
-                            log_int("AL",(uint32_t)p->length);
-                            log_int("adv", p->payload[i]);
-                            while(1);
-                        }
                     }
                 }
             }
@@ -485,25 +473,25 @@ extern "C" void RADIO_IRQHandler(void)
                 // track frame_id to prevent duplication.
                 TRACK_FRAME(p->frame_id);
 
+                uint32_t t_end = TIMER_GET_CC(TIMER_CC_TIMESTAMP);
+                uint32_t tx_time = (p->length + RADIO_ON_AIR_BYTES) * TIME_TO_TRANSMIT_BYTE_1MB;
+
+                // this is the last frame in the slot
+                // compute disable time.
+                if (p->flags & TMDMA_CAT_FRAME_FLAGS_DONE)
+                    SET_RADIO_DISABLE(t_end, p->ttl + 1, tx_time);
+
                 //only sync to the first frame in a slot.
+                // (also ensure the slot isn't our own)
                 if (!tdma_is_owner() && p->frame_id == 0)
-                    SYNC_TO_FRAME(p->ttl + 1, p->initial_ttl, p->length);
-                    // SYNC_TO_FRAME(p->ttl + 1, p->initial_ttl, p->length);
+                    SYNC_TO_FRAME(t_end, p->ttl + 1, p->initial_ttl, tx_time);
 
                 process_packet(p, crc, 1);
 
                 tdma_set_current_slot(p->slot_id);
                 slot.slot_identifier = p->slot_id;
 
-                int ret = tdma_set_slot(slot);
-                if (ret < 0)
-                {
-                    log_int("BCS",tdma_current_slot_idx());
-                    log_int("BSI",p->slot_id);
-                    log_int("BDI",(uint32_t)p->device_id);
-                    log_int("BF",(uint32_t)p->flags);
-                    log_int("BL",(uint32_t)p->length);
-                }
+                tdma_set_slot(slot);
                 TDMACATRadio::instance->queueRxFrame(&TDMACATRadio::instance->staticFrame);
                 process_packet(p, crc, 2);
             }

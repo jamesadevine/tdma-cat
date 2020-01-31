@@ -51,7 +51,6 @@ int tdma_clear_slot(uint32_t slot_identifier)
     return MICROBIT_OK;
 }
 
-#include "MicroBitConfig.h"
 int tdma_set_slot(TDMA_CAT_Slot slot)
 {
     uint16_t index = slot.slot_identifier;
@@ -136,6 +135,11 @@ int tdma_is_advertising_slot()
 int tdma_is_owner()
 {
     return (table[current_slot].flags & TDMA_SLOT_FLAGS_OWNER ? 1 : 0);
+}
+
+int tdma_slot_is_occupied()
+{
+    return (table[current_slot].flags & TDMA_SLOT_FLAGS_UNITIALISED) ? 0 : 1;
 }
 
 int tdma_rx_error()
