@@ -94,13 +94,13 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 #define RADIO_STATE_FORWARD     (3)
 #define RADIO_STATE_DISCOVER    (4)
 
-#define TDMA_STATE_EXPLORER     (1)
-#define TDMA_STATE_ADVERTISER   (2)
-#define TDMA_STATE_REPEATER     (3)
-#define TDMA_STATE_OWNER        (4)
+#define TDMA_STATE_INITIALISATION       (1)
+#define TDMA_STATE_DISCOVER             (2)
+#define TDMA_STATE_NORMAL               (3)
 
 volatile uint8_t radioState = RADIO_STATE_RECEIVE;
-volatile uint8_t tdmaState = TDMA_STATE_EXPLORER;
+volatile uint8_t tdmaState = TDMA_STATE_INITIALISATION;
+volatile int16_t discover_schedule_start = -1;
 
 extern void set_transmission_reception_gpio(int);
 extern void process_packet(TDMACATSuperFrame* p, bool, int);
@@ -229,13 +229,16 @@ inline void SYNC_TO_FRAME(uint32_t t_end, int ttl, int initial_ttl, int tx_time)
     uint32_t time_to_arrive = tx_time + (hops * (tx_time + RADIO_DISABLE_TIME + RADIO_TX_TIME));
     uint32_t t_start = t_end - time_to_arrive;
 
-    if (tdmaState == TDMA_STATE_EXPLORER)
+    if (tdmaState == TDMA_STATE_INITIALISATION)
+    {
         TIMER_SET_CC(TIMER_CC_TDMA, t_start + (TDMA_CAT_SLOT_SIZE_US - TDMA_PREPARATION_OFFSET_US));
+        tdmaState = TDMA_STATE_DISCOVER;
+    }
     else
     {
         int error = t_start - TDMA_PREPARATION_OFFSET_US;
         sync_drift = (sync_drift + error) / 2;
-        SERIAL_DEBUG->printf("E: %d\r\n",error);
+        // SERIAL_DEBUG->printf("E: %d\r\n",error);
     }
 }
 
@@ -280,6 +283,7 @@ void timer_callback(uint8_t)
     }
     else
     {
+        tdmaState = TDMA_STATE_NORMAL;
         tdma_set_current_slot(TDMA_CAT_ADVERTISEMENT_SLOT);
         process_packet(NULL, true, 6);
     }
@@ -291,6 +295,29 @@ void timer_callback(uint8_t)
     // log_int("qs", TDMACATRadio::instance->queueSize(&TDMACATRadio::instance->txTail, &TDMACATRadio::instance->txHead));
 
     int wakeUpTime = TDMA_PREPARATION_OFFSET_US - RADIO_TX_TIME;
+
+    if (tdmaState == TDMA_STATE_DISCOVER)
+    {
+        int cs = tdma_current_slot_idx();
+        if (discover_schedule_start == -1)
+            discover_schedule_start = cs;
+        else if (discover_schedule_start == cs)
+            tdmaState = TDMA_STATE_NORMAL;
+
+        radioState = RADIO_STATE_RECEIVE;
+
+        wakeUpTime -= TDMA_GRACE_PERIOD_US;
+
+        NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
+
+        TIMER_SET_CC(TIMER_CC_TX_RX, wakeUpTime);
+
+        RADIO_ENABLE_READY_START_SHORT();
+
+        PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
+        PPI_ENABLE_CHAN(PPI_CHAN_END);
+        return;
+    }
 
     if (owner)
     {
@@ -342,13 +369,16 @@ void timer_callback(uint8_t)
             // it's our slot but we have nothing to send. Let's send a keep alive message
             // to ensure that we do not lose our slot.
             TDMACATRadio::instance->staticFrame.length = TDMA_CAT_HEADER_SIZE - 1;
+#ifndef TDMA_CUSTOM_SERIAL_NUMBER
             TDMACATRadio::instance->staticFrame.device_id = microbit_serial_number();
+#else
+            TDMACATRadio::instance->staticFrame.device_id = TDMA_CUSTOM_SERIAL_NUMBER;
+#endif
         }
 
         if (needToTransmit)
         {
             // log_int("TA",wakeUpTime);
-            tdmaState = TDMA_STATE_OWNER;
             radioState = RADIO_STATE_TRANSMIT;
             // SERIAL_DEBUG->printf("T %d %d\r\n",tdma_current_slot_idx(),our_slots);
 
@@ -376,7 +406,6 @@ void timer_callback(uint8_t)
     // only if the slot is occupied.
     if (tdma_slot_is_occupied())
     {
-        tdmaState = TDMA_STATE_REPEATER;
         radioState = RADIO_STATE_RECEIVE;
 
         wakeUpTime -= TDMA_GRACE_PERIOD_US;
@@ -486,6 +515,8 @@ extern "C" void RADIO_IRQHandler(void)
                 if (!tdma_is_owner() && p->frame_id == 0)
                     SYNC_TO_FRAME(t_end, p->ttl + 1, p->initial_ttl, tx_time);
 
+                SERIAL_DEBUG->printf("ADD:%d",(int)p->device_id);
+
                 process_packet(p, crc, 1);
 
                 tdma_set_current_slot(p->slot_id);
@@ -583,9 +614,13 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer)
 
     microbit_seed_random();
 
+#ifndef TDMA_CUSTOM_SERIAL_NUMBER
     log_int("OUR_DI", (uint32_t)microbit_serial_number());
     tdma_init(microbit_serial_number());
-
+#else
+    log_int("OUR_DI", TDMA_CUSTOM_SERIAL_NUMBER);
+    tdma_init(TDMA_CUSTOM_SERIAL_NUMBER);
+#endif
     instance = this;
 }
 
@@ -825,7 +860,7 @@ int TDMACATRadio::enable()
 
     PPI_ENABLE_CHAN(PPI_CHAN_END);
 
-    tdmaState = TDMA_STATE_EXPLORER;
+    tdmaState = TDMA_STATE_INITIALISATION;
 
     int disable_time = TDMA_DISCOVER_BACK_OFF + microbit_random(1000);
 

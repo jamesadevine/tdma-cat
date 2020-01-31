@@ -201,6 +201,15 @@ extern "C" void RADIO_IRQHandler(void)
     if (radioState == RADIO_STATE_RECEIVE)
     {
         packets_received++;
+
+        TDMA_CAT_Slot slot;
+        slot.device_identifier = p->device_id;
+        slot.distance = p->initial_ttl - (p->ttl + 1);
+        slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
+        slot.flags = 0;
+        slot.slot_identifier = p->slot_id;
+        tdma_set_slot(slot);
+
         NRF_RADIO->PACKETPTR = (uint32_t)p;
         process_packet(p, NRF_RADIO->CRCSTATUS == 1, 0);
 #if TDMA_CAT_ASSERT == 1
@@ -275,6 +284,14 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer)
     NRF_TIMER0->CC[3] = 0;
 
     TIMER_STOP();
+
+#ifndef TDMA_CUSTOM_SERIAL_NUMBER
+    log_int("OUR_DI", (uint32_t)microbit_serial_number());
+    tdma_init(microbit_serial_number());
+#else
+    log_int("OUR_DI", TDMA_CUSTOM_SERIAL_NUMBER);
+    tdma_init(TDMA_CUSTOM_SERIAL_NUMBER);
+#endif
 
     microbit_seed_random();
 

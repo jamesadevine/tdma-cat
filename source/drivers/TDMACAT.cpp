@@ -67,6 +67,7 @@ int tdma_set_slot(TDMA_CAT_Slot slot)
 
         slot.flags |= (table[index].flags & TDMA_SLOT_FLAGS_OWNER);
         table[index] = slot;
+        SERIAL_DEBUG->printf("A: %d",(int)slot.device_identifier);
         return MICROBIT_OK;
     }
 
