@@ -62,6 +62,8 @@ volatile uint32_t packets_error = 0;
 volatile uint32_t packets_transmitted = 0;
 volatile uint32_t packets_forwarded = 0;
 
+volatile int sync_drift = 0;
+
 volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 
 /**
@@ -238,9 +240,8 @@ inline void SYNC_TO_FRAME(int ttl, int initial_ttl, int packet_size)
     else
     {
         int error = t_end - time_to_arrive - TDMA_PREPARATION_OFFSET_US;
-        SERIAL_DEBUG->printf("ERR %d\r\n", error);
-        // if (abs(error) > 50)
-        //     TIMER_OFFSET_CC(TIMER_CC_TDMA, error);
+        sync_drift = (sync_drift + error) / 2;
+        SERIAL_DEBUG->printf("E: %d\r\n",error);
     }
 }
 
@@ -253,13 +254,11 @@ void timer_callback(uint8_t)
     PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
 
     if (tdmaState == TDMA_STATE_EXPLORER)
-    {
         TIMER_CLEAR();
-        TIMER_ENABLE_CLEAR_ON_COMPARE(TIMER_CC_CLEAR_COUNTER);
-    }
 
     TIMER_SET_CC(TIMER_CC_CLEAR_COUNTER, TDMA_CAT_SLOT_SIZE_US);
     TIMER_SET_CC(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
+
     TIMER_ENABLE_CLEAR_ON_COMPARE(TIMER_CC_CLEAR_COUNTER);
     RADIO_DISABLE();
 
@@ -301,6 +300,11 @@ void timer_callback(uint8_t)
 
         if (tdma_is_advertising_slot())
         {
+            int compensation = -(sync_drift / 10);
+            sync_drift = 0;
+            TIMER_SET_CC(TIMER_CC_CLEAR_COUNTER, TDMA_CAT_SLOT_SIZE_US - (compensation * 5));
+            TIMER_SET_CC(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US - (compensation * 5));
+
             // update table expiration every window.
             tdma_window_tick();
 
@@ -754,6 +758,8 @@ int TDMACATRadio::enable()
     // pre allocate all buffers
     for (int i = 0; i < TDMA_CAT_BUFFER_POOL_SIZE; i++)
         this->bufferPool[i] = new TDMACATSuperFrame;
+
+    sync_drift = 0;
 
     // Enable the High Frequency clock on the processor. This is a pre-requisite for
     // the RADIO module. Without this clock, no communication is possible.
