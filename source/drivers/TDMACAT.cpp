@@ -60,6 +60,7 @@ int tdma_set_slot(TDMA_CAT_Slot slot)
 
     if ((table[index].flags & TDMA_SLOT_FLAGS_UNITIALISED) || (table[index].flags & TDMA_SLOT_FLAGS_ADVERTISE) || slot.device_identifier == table[index].device_identifier)
     {
+
         // the radio code is generalised such that we may receive our own advertisement packets
         // if we do, then we do not want to lose important metadata.
         if (table[index].expiration == TDMA_CAT_NEVER_EXPIRE)
@@ -67,7 +68,7 @@ int tdma_set_slot(TDMA_CAT_Slot slot)
 
         slot.flags |= (table[index].flags & TDMA_SLOT_FLAGS_OWNER);
         table[index] = slot;
-        SERIAL_DEBUG->printf("A: %d",(int)slot.device_identifier);
+        // SERIAL_DEBUG->printf("SS: %d %d %d\r\n", index, (int)slot.device_identifier, slot.flags);
         return MICROBIT_OK;
     }
 
@@ -111,7 +112,7 @@ int tdma_advance_slot()
     {
         adv_slot_counter++;
 
-        if (current_slot % adv_slot_match == 0)
+        if (adv_slot_counter % adv_slot_match == 0)
         {
             adv_slot_match = 1 + microbit_random(TDMA_CAT_ADV_SLOT_MATCH_MAX);
             return 1;
@@ -307,7 +308,7 @@ void tdma_window_tick()
 
 int tdma_get_distance()
 {
-    int biggest_distance = -1;
+    int biggest_distance = 0;
 
     for (int i = 1; i < TDMA_CAT_TABLE_SIZE; i++)
     {
@@ -318,6 +319,6 @@ int tdma_get_distance()
             biggest_distance = table[i].distance;
     }
 
-    return (biggest_distance < 0) ? 0 : biggest_distance;
+    return biggest_distance;
 }
 
