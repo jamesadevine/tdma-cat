@@ -96,6 +96,14 @@ TDMA_CAT_Slot tdma_get_current_slot();
 int tdma_is_synchronised();
 
 /**
+ * Gets the distance for the current slot.
+ *
+ * @returns the detected distance stored in the table, or if the current slot is uninitialised
+ *          the biggest distance expected by the tdma driver (TDMA_CAT_DEFAULT_ADVERT_TTL)
+ **/
+int tdma_slot_distance();
+
+/**
  * Determines if this device owns the current slot.
  *
  * @returns 1 if it does, 0 otherwise.

@@ -298,6 +298,11 @@ void tdma_window_tick()
     tdma_flag_errors();
 }
 
+int tdma_slot_distance()
+{
+    return table[current_slot].distance;
+}
+
 int tdma_get_distance()
 {
     int biggest_distance = 0;

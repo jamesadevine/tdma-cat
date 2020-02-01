@@ -48,11 +48,15 @@ TDMACATRadio* TDMACATRadio::instance = NULL;
 #define FRAME_TRACKER_UNINITIALISED_VALUE     255
 
 #define RADIO_DISABLE_TIME                  3
-#define RADIO_TX_TIME                       145
+#define RADIO_TURNAROUND_TIME_US                       145
 #define RADIO_DISABLE_TOLERANCE             100
 
 // 4 bytes address, 1 prefix, 1 pre amble, 2 crc
 #define RADIO_ON_AIR_BYTES                  8
+#define RADIO_MAX_PACKET_SIZE               (TDMA_CAT_MAX_PACKET_SIZE + TDMA_CAT_HEADER_SIZE + RADIO_ON_AIR_BYTES)
+#define RADIO_MIN_PACKET_SIZE               (TDMA_CAT_HEADER_SIZE + RADIO_ON_AIR_BYTES)
+#define RADIO_MAX_PACKET_TIME_US            (RADIO_MAX_PACKET_SIZE * TIME_TO_TRANSMIT_BYTE_1MB)
+#define RADIO_MIN_PACKET_TIME_US            (RADIO_MIN_PACKET_SIZE * TIME_TO_TRANSMIT_BYTE_1MB)
 
 #define TDMA_DISCOVER_BACK_OFF              2000000
 #define TDMA_PREPARATION_OFFSET_US          2000
@@ -74,6 +78,14 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
   **/
 #define TDMA_CAT_ASSERT 1
 #define TDMA_SUPPORT_RENEGOTIATION 0
+
+// the device will always wake and disable and fixed intervals
+#define STATIC_WAKE_DISABLE         1
+// the device will wake and disable based on the computed distance
+// from the device that owns the slot.
+#define DYNAMIC_WAKE_DISABLE        2
+
+#define RADIO_WAKE_DISABLE_CONFIGURATION DYNAMIC_WAKE_DISABLE
 
 #if TDMA_CAT_TEST_MODE == 1
     TestRole testRole;
@@ -235,7 +247,7 @@ inline void SYNC_TO_FRAME(uint32_t t_end, int ttl, int initial_ttl, int tx_time)
     // as packets have a predictable transmission time we can compute
     // when the transmitting device triggered a transmission.
     uint8_t hops = initial_ttl - ttl;
-    uint32_t time_to_arrive = tx_time + (hops * (tx_time + RADIO_DISABLE_TIME + RADIO_TX_TIME));
+    uint32_t time_to_arrive = tx_time + (hops * (tx_time + RADIO_DISABLE_TIME + RADIO_TURNAROUND_TIME_US));
     uint32_t t_start = t_end - time_to_arrive;
 
     // this is the first packet received after power on; snap to the schedule
@@ -259,7 +271,7 @@ inline void SET_RADIO_DISABLE(uint32_t t_end, int ttl, uint32_t tx_time)
     // the radio to disable itself in the future.
     // (although the radio automatically powers off upon an END event
     // we may miss retransmissions).
-    TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, t_end + (ttl * (tx_time + RADIO_DISABLE_TIME + RADIO_TX_TIME)) + RADIO_DISABLE_TOLERANCE);
+    TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, t_end + (ttl * (tx_time + RADIO_DISABLE_TIME + RADIO_TURNAROUND_TIME_US)) + RADIO_DISABLE_TOLERANCE);
     PPI_ENABLE_CHAN(PPI_CHAN_DIS);
 }
 
@@ -285,7 +297,7 @@ void timer_callback(uint8_t)
 
     // this variable will be set to one if we do not want to sleep through empty slots.
     // This is useful for discovering / re-discovering the schedule.
-    int preventSleep = 0;
+    bool needToReceive = false;
 
     // reset the frame tracker each window.
     memset((void*)frame_tracker, FRAME_TRACKER_UNINITIALISED_VALUE, FRAME_TRACKER_BUFFER_SIZE);
@@ -318,7 +330,7 @@ void timer_callback(uint8_t)
     // helps to ensure that the schedule is discovered / re-discovered.
     if (tdmaState == TDMA_STATE_DISCOVER || tdmaState == TDMA_STATE_LISTEN)
     {
-        preventSleep = 1;
+        needToReceive = true;
         int cs = tdma_current_slot_idx();
         if (discover_schedule_start == -1)
             discover_schedule_start = cs;
@@ -329,9 +341,10 @@ void timer_callback(uint8_t)
         }
     }
 
-    // the time we power up the transmitter is 2000us - the time it takes to power
+    // the time we power up the transmitter is: 2000 - the time it takes to power
     // up the transmitter.
-    int wakeUpTime = TDMA_PREPARATION_OFFSET_US - RADIO_TX_TIME;
+    int wakeTime = TDMA_PREPARATION_OFFSET_US - RADIO_TURNAROUND_TIME_US;
+    int disableTime = wakeTime;
 
     if (!(tdmaState == TDMA_STATE_DISCOVER) && owner)
     {
@@ -354,14 +367,14 @@ void timer_callback(uint8_t)
             {
                 // random backoff
                 needToTransmit = true;
-                wakeUpTime += microbit_random(TDMA_CAT_SLOT_SIZE_US - 5000);
+                wakeTime += microbit_random(TDMA_CAT_SLOT_SIZE_US - 5000);
                 tdma_fill_advertising_frame(&TDMACATRadio::instance->staticFrame);
             }
 #if TDMA_SUPPORT_RENEGOTIATION == 1
             else if (tdma_renegotiation_required())
             {
                 needToTransmit = true;
-                wakeUpTime += microbit_random(TDMA_CAT_SLOT_SIZE_US - 5000);
+                wakeTime += microbit_random(TDMA_CAT_SLOT_SIZE_US - 5000);
                 tdma_fill_renogotiation_frame(&TDMACATRadio::instance->staticFrame);
             }
 #endif
@@ -404,7 +417,7 @@ void timer_callback(uint8_t)
             NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
             // set to power up the transmitter at t = 2 000 - time to power up transmitter us.
-            TIMER_SET_CC(TIMER_CC_TX_RX, wakeUpTime);
+            TIMER_SET_CC(TIMER_CC_TX_RX, wakeTime);
             RADIO_ENABLE_READY_START_SHORT();
 
             PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
@@ -413,19 +426,43 @@ void timer_callback(uint8_t)
         }
     }
 
+    if (tdma_slot_is_occupied())
+    {
+        needToReceive = true;
+
+#if RADIO_WAKE_DISABLE_CONFIGURATION == DYNAMIC_WAKE_DISABLE
+        // if the slot is occupied, then compute the wake sleep based upon the distance to the node
+        // (if config is set)
+        // also wake up a little bit early and sleep a little late
+        wakeTime += (tdma_slot_distance() * (RADIO_MIN_PACKET_SIZE + RADIO_TURNAROUND_TIME_US)) - TDMA_GRACE_PERIOD_US;
+        disableTime += (tdma_slot_distance() * (RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US)) + TDMA_GRACE_PERIOD_US;
+#else
+        // wake up early
+        wakeTime -= TDMA_GRACE_PERIOD_US;
+        // expect to receive a packet within the first 2 ms of tx window.
+        // set to disable at t = 4 000 us unless computation is dependent on distance
+        // (this is set by configuring dynamic wake mode)
+        disabletime += TDMA_PREPARATION_OFFSET_US;
+#endif
+    }
+    else
+    {
+        // slot is not occupied but we may be listening / discovering and further
+        // than 1 hop from a node in the network.
+        disableTime += TDMA_CAT_DEFAULT_ADVERT_TTL * ((RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US));
+    }
+
     // if we don't need to transmit, we drop through into receive mode.
     // We only receive if the slot is occupied (according to the schedule)
     // or if we're discovering / listening.
-    if (preventSleep || tdma_slot_is_occupied())
+    if (needToReceive)
     {
         radioState = RADIO_STATE_RECEIVE;
 
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
-        // set to disable at t = 4 000 us.
-        TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, wakeUpTime + TDMA_PREPARATION_OFFSET_US);
-        // set to wake at t = 1 500 us.
-        TIMER_SET_CC(TIMER_CC_TX_RX, wakeUpTime - TDMA_GRACE_PERIOD_US);
+        TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, disableTime);
+        TIMER_SET_CC(TIMER_CC_TX_RX, wakeTime);
 
         RADIO_ENABLE_READY_START_SHORT();
 
