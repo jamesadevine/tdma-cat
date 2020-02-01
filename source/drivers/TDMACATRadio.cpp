@@ -426,6 +426,11 @@ void timer_callback(uint8_t)
         }
     }
 
+    if (tdma_is_advertising_slot())
+    {
+        wakeTime -= TDMA_GRACE_PERIOD_US;
+        disableTime = TDMA_CAT_SLOT_SIZE_US;
+    }
     if (tdma_slot_is_occupied())
     {
         needToReceive = true;
