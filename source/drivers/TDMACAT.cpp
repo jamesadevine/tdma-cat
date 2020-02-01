@@ -101,9 +101,6 @@ void tdma_set_current_slot(int slot_id)
     current_slot = slot_id;
 }
 
-/**
- * Returns 1 if transmission is required in the next time slot.
- **/
 int tdma_advance_slot()
 {
     current_slot = (current_slot + 1) % TDMA_CAT_TABLE_SIZE;
@@ -144,14 +141,9 @@ int tdma_slot_is_occupied()
     return (table[current_slot].flags & TDMA_SLOT_FLAGS_UNITIALISED) ? 0 : 1;
 }
 
-int tdma_rx_error()
+void tdma_rx_error()
 {
-    if (current_slot == TDMA_CAT_ADVERTISEMENT_SLOT)
-        return MICROBIT_INVALID_PARAMETER;
-
     table[current_slot].errors++;
-
-    return MICROBIT_OK;
 }
 
 int tdma_count_slots()
