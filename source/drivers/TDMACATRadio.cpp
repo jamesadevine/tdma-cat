@@ -73,11 +73,6 @@ volatile int window_count = 0;
 
 volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 
-/**
-  * Driver configuration flags
-  **/
-#define TDMA_CAT_ASSERT 1
-#define TDMA_SUPPORT_RENEGOTIATION 0
 
 // the device will always wake and disable and fixed intervals
 #define STATIC_WAKE_DISABLE         1
@@ -85,7 +80,22 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 // from the device that owns the slot.
 #define DYNAMIC_WAKE_DISABLE        2
 
-#define RADIO_WAKE_DISABLE_CONFIGURATION DYNAMIC_WAKE_DISABLE
+#define RADIO_DISABLE_NEVER             1
+#define RADIO_DISABLE_WHERE_POSSIBLE    2
+
+/**
+  * Driver configuration flags
+  **/
+// assert the hardware is in the correct state
+#define TDMA_CAT_ASSERT 1
+// send error frames to slots that see a high number of errors
+#define TDMA_SUPPORT_RENEGOTIATION 0
+// use fixed wake up and sleep times, or dynamic ones computed
+// from the table
+#define RADIO_WAKE_DISABLE_CONFIGURATION    STATIC_WAKE_DISABLE
+#define RADIO_DISABLE_CONFIGURATION         RADIO_DISABLE_NEVER
+// set a custom serial number for testing.
+#define TDMA_CUSTOM_SERIAL_NUMBER       14
 
 #if TDMA_CAT_TEST_MODE == 1
     TestRole testRole;
@@ -118,8 +128,6 @@ volatile uint8_t tdmaState = TDMA_STATE_INITIALISATION;
 volatile int16_t discover_schedule_start = -1;
 
 uint32_t serial_number = 0;
-
-#define TDMA_CUSTOM_SERIAL_NUMBER       11
 
 extern void set_transmission_reception_gpio(int);
 extern void process_packet(TDMACATSuperFrame* p, bool, int);
@@ -349,6 +357,7 @@ void timer_callback(uint8_t)
     if (!(tdmaState == TDMA_STATE_DISCOVER) && owner)
     {
         bool needToTransmit = false;
+        int ttl = 1 + tdma_get_distance();
 
         if (tdma_is_advertising_slot())
         {
@@ -392,6 +401,8 @@ void timer_callback(uint8_t)
                 // return the buffer to the pool of buffers
                 TDMACATRadio::instance->addBufferToPool(p);
             }
+            TDMACATRadio::instance->staticFrame.ttl = ttl;
+            TDMACATRadio::instance->staticFrame.initial_ttl = ttl;
         }
         else
         {
@@ -400,18 +411,17 @@ void timer_callback(uint8_t)
             needToTransmit = true;
             TDMACATRadio::instance->staticFrame.length = TDMA_CAT_HEADER_SIZE - 1;
             TDMACATRadio::instance->staticFrame.device_id = serial_number;
+            TDMACATRadio::instance->staticFrame.ttl = ttl;
+            TDMACATRadio::instance->staticFrame.initial_ttl = ttl;
         }
 
         if (needToTransmit)
         {
-            int ttl = 1 + tdma_get_distance();
             radioState = RADIO_STATE_TRANSMIT;
 
             // set reasonable frame defaults
             TDMACATRadio::instance->staticFrame.frame_id = 0;
             TDMACATRadio::instance->staticFrame.flags |= TMDMA_CAT_FRAME_FLAGS_DONE;
-            TDMACATRadio::instance->staticFrame.ttl = ttl;
-            TDMACATRadio::instance->staticFrame.initial_ttl = ttl;
             TDMACATRadio::instance->staticFrame.slot_id = tdma_current_slot_idx();
 
             NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
@@ -439,22 +449,23 @@ void timer_callback(uint8_t)
         // if the slot is occupied, then compute the wake sleep based upon the distance to the node
         // (if config is set)
         // also wake up a little bit early and sleep a little late
-        wakeTime += (tdma_slot_distance() * (RADIO_MIN_PACKET_SIZE + RADIO_TURNAROUND_TIME_US)) - TDMA_GRACE_PERIOD_US;
-        disableTime += (tdma_slot_distance() * (RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US)) + TDMA_GRACE_PERIOD_US;
+        int distance = tdma_slot_distance();
+        wakeTime += (distance * (RADIO_MIN_PACKET_SIZE + RADIO_TURNAROUND_TIME_US)) - TDMA_GRACE_PERIOD_US;
+        disableTime += ((distance + 1) * (RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US)) + TDMA_GRACE_PERIOD_US;
 #else
         // wake up early
         wakeTime -= TDMA_GRACE_PERIOD_US;
         // expect to receive a packet within the first 2 ms of tx window.
         // set to disable at t = 4 000 us unless computation is dependent on distance
         // (this is set by configuring dynamic wake mode)
-        disabletime += TDMA_PREPARATION_OFFSET_US;
+        disableTime += TDMA_PREPARATION_OFFSET_US;
 #endif
     }
     else
     {
         // slot is not occupied but we may be listening / discovering and further
         // than 1 hop from a node in the network.
-        disableTime += TDMA_CAT_DEFAULT_ADVERT_TTL * ((RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US));
+        disableTime += TDMA_CAT_DEFAULT_ADVERT_TTL * ((RADIO_MAX_PACKET_TIME_US + RADIO_TURNAROUND_TIME_US)) + TDMA_GRACE_PERIOD_US;
     }
 
     // if we don't need to transmit, we drop through into receive mode.
@@ -465,15 +476,17 @@ void timer_callback(uint8_t)
         radioState = RADIO_STATE_RECEIVE;
 
         NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
-
+#if RADIO_DISABLE_CONFIGURATION == RADIO_DISABLE_WHERE_POSSIBLE
         TIMER_SET_CC(TIMER_CC_DISABLE_RADIO, disableTime);
+        PPI_ENABLE_CHAN(PPI_CHAN_DIS);
+#endif
         TIMER_SET_CC(TIMER_CC_TX_RX, wakeTime);
 
         RADIO_ENABLE_READY_START_SHORT();
 
         PPI_ENABLE_CHAN(PPI_CHAN_RX_EN);
         PPI_ENABLE_CHAN(PPI_CHAN_END);
-        PPI_ENABLE_CHAN(PPI_CHAN_DIS);
+
     }
 }
 
@@ -503,6 +516,7 @@ extern "C" void RADIO_IRQHandler(void)
     {
         if(NRF_RADIO->CRCSTATUS == 1)
         {
+            int correction = 0;
             if(p->ttl != 0)
             {
                 p->ttl--;
@@ -521,6 +535,7 @@ extern "C" void RADIO_IRQHandler(void)
                 volatile int i = 250;
                 while(i-- > 0);
                 NRF_RADIO->TASKS_START = 1;
+                correction = 1;
             }
 
             packets_received++;
@@ -530,7 +545,9 @@ extern "C" void RADIO_IRQHandler(void)
 
             TDMA_CAT_Slot slot;
             slot.device_identifier = p->device_id;
-            slot.distance = p->initial_ttl - (p->ttl + 1);
+            // if we decrement the ttl, we need to apply a correction.
+            // Otherwise the distance calculation will be incorrect
+            slot.distance = p->initial_ttl - (p->ttl + correction);
             slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;
             slot.flags = 0;
 
@@ -544,14 +561,13 @@ extern "C" void RADIO_IRQHandler(void)
                     for (int i = 0; i < p->length - (TDMA_CAT_HEADER_SIZE - 1); i++)
                     {
                         slot.slot_identifier = p->payload[i];
-                        int ret;
 
                         // error frame? clear the slots in the payload
                         if (error)
                             tdma_clear_slot(p->payload[i]);
                         else
-                        // otherwise update our table
-                            tdma_set_slot(slot);
+                            // otherwise update our table
+                            tdma_set_slot(slot, true);
                     }
                 }
             }
@@ -574,18 +590,20 @@ extern "C" void RADIO_IRQHandler(void)
                 // compute disable time.
 
                 // (note for now there is only one frame per slot)
+#if RADIO_DISABLE_CONFIGURATION == RADIO_DISABLE_WHERE_POSSIBLE
                 if (p->flags & TMDMA_CAT_FRAME_FLAGS_DONE)
-                    SET_RADIO_DISABLE(t_end, p->ttl + 1, tx_time);
+                    SET_RADIO_DISABLE(t_end, p->ttl + correction, tx_time);
+#endif
 
                 // only sync to the first frame in a slot.
                 // (also ensure the slot isn't our own, syncing yourself is
                 // usually sad and a little bit depressing)
                 if (!tdma_is_owner() && p->frame_id == 0)
                 {
-                    SYNC_TO_FRAME(t_end, p->ttl + 1, p->initial_ttl, tx_time);
+                    SYNC_TO_FRAME(t_end, p->ttl + correction, p->initial_ttl, tx_time);
                     tdma_set_current_slot(p->slot_id);
                     slot.slot_identifier = p->slot_id;
-                    tdma_set_slot(slot);
+                    tdma_set_slot(slot, false);
                 }
 
                 // queue the received frame from our pool of pre-allocated buffers.
