@@ -3,6 +3,8 @@
 #include "TDMACATRadio.h"
 
 static TDMA_CAT_Slot table[TDMA_CAT_TABLE_SIZE];
+static TDMA_CAT_Slot init;
+
 static volatile int current_slot = TDMA_CAT_UNITIALISED_SLOT;
 
 static volatile int adv_slot_match = 0;
@@ -25,9 +27,8 @@ int tdma_init(uint64_t device_identifier)
 
     table[TDMA_CAT_ADVERTISEMENT_SLOT] = adv;
 
-    TDMA_CAT_Slot init;
     init.expiration = 0;
-    init.distance = 0;
+    init.distance = 0xf;
     init.flags = TDMA_SLOT_FLAGS_UNITIALISED;
     init.slot_identifier = 0;
     init.device_identifier = 0;
@@ -46,12 +47,12 @@ int tdma_clear_slot(uint32_t slot_identifier)
     if (slot_identifier > TDMA_CAT_TABLE_SIZE - 1 || slot_identifier == TDMA_CAT_ADVERTISEMENT_SLOT)
         return MICROBIT_INVALID_PARAMETER;
 
-    table[slot_identifier].flags = TDMA_SLOT_FLAGS_UNITIALISED;
+    table[slot_identifier] = init;
 
     return MICROBIT_OK;
 }
 
-int tdma_set_slot(TDMA_CAT_Slot slot)
+int tdma_set_slot(TDMA_CAT_Slot slot, bool maintainDistance)
 {
     uint16_t index = slot.slot_identifier;
 
@@ -65,6 +66,9 @@ int tdma_set_slot(TDMA_CAT_Slot slot)
         // if we do, then we do not want to lose important metadata.
         if (table[index].expiration == TDMA_CAT_NEVER_EXPIRE)
             slot.expiration = TDMA_CAT_NEVER_EXPIRE;
+
+        if (maintainDistance)
+            slot.distance = min(slot.distance, table[index].distance);
 
         slot.flags |= (table[index].flags & TDMA_SLOT_FLAGS_OWNER);
         table[index] = slot;
@@ -87,11 +91,8 @@ int tdma_current_slot_idx()
 
 TDMA_CAT_Slot tdma_get_current_slot()
 {
-    TDMA_CAT_Slot blank;
-    blank.flags = TDMA_SLOT_FLAGS_UNITIALISED;
-
     if (current_slot == TDMA_CAT_UNITIALISED_SLOT)
-        return blank;
+        return init;
 
     return table[current_slot];
 }
@@ -288,7 +289,7 @@ static void tdma_expire()
         table[i].expiration--;
 
         if (table[i].expiration == 0)
-            table[i].flags = TDMA_SLOT_FLAGS_UNITIALISED;
+            table[i] = init;
     }
 }
 

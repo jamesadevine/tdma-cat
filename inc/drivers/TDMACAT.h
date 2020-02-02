@@ -55,7 +55,7 @@ void tdma_set_current_slot(int id);
  *
  * @param slot the new slot metadata to store.
  **/
-int tdma_set_slot(TDMA_CAT_Slot slot);
+int tdma_set_slot(TDMA_CAT_Slot slot, bool maintainDistance);
 
 /**
  * Clears a slot using the provided slot_identifier.
