@@ -202,7 +202,7 @@ extern "C" void RADIO_IRQHandler(void)
     {
         packets_received++;
 
-        TDMA_CAT_Slot slot;
+        TDMACATSlot slot;
         slot.device_identifier = p->device_id;
         slot.distance = p->initial_ttl - (p->ttl + 1);
         slot.expiration = TDMA_CAT_DEFAULT_EXPIRATION;

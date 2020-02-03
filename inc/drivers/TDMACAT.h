@@ -16,23 +16,22 @@
 #define TDMA_CAT_NEVER_EXPIRE           0xff
 
 #define TDMA_SLOT_FLAGS_ADVERTISE       0x1
-#define TDMA_SLOT_FLAGS_UNITIALISED     0x2
+#define TDMA_SLOT_FLAGS_UNINITIALISED   0x2
 #define TDMA_SLOT_FLAGS_OWNER           0x4
 #define TDMA_SLOT_FLAGS_ERROR           0x8
 
 struct TDMACATSuperFrame;
 
-struct TDMA_CAT_Slot {
+struct TDMACATSlot {
     uint64_t device_identifier;
     uint8_t slot_identifier;
-    uint8_t errors;
     uint8_t expiration;
     uint8_t distance:4; uint8_t flags:4;
-};
-
-struct TDMA_CAT_Advertisement {
-    uint64_t device_identifier;
-    uint16_t slot_identifier;
+    uint8_t frame_errors;
+    uint8_t packet_counter;
+    uint8_t frame_counter;
+    uint8_t packets_per_window;
+    uint8_t frames_per_window;
 };
 
 /**
@@ -55,7 +54,7 @@ void tdma_set_current_slot(int id);
  *
  * @param slot the new slot metadata to store.
  **/
-int tdma_set_slot(TDMA_CAT_Slot slot, bool maintainDistance);
+int tdma_set_slot(TDMACATSlot slot, bool maintainDistance);
 
 /**
  * Clears a slot using the provided slot_identifier.
@@ -72,21 +71,21 @@ int tdma_clear_slot(uint32_t slot_identifier);
  * @param slot_identifier the slot metadata to fetch. If the slot is unused or
  *                        not found, the slot flags will be set to uninitialised.
  **/
-TDMA_CAT_Slot tdma_get_slot(uint32_t slot_identifier);
+TDMACATSlot tdma_get_slot(uint32_t slot_identifier);
 
 /**
  * Retrieves the current slot index used to index the tdma schedule
  *
  * @returns the current slot index.
  **/
-int tdma_current_slot_idx();
+int tdma_current_slot_index();
 
 /**
  * Retrieves the current slot metadata from the tdma schedule
  *
  * @returns the currently indexed slot from the table
  **/
-TDMA_CAT_Slot tdma_get_current_slot();
+TDMACATSlot tdma_get_current_slot();
 
 /**
  * Determines if the current_slot_index variable has been initialised.
@@ -123,6 +122,14 @@ int tdma_is_advertising_slot();
  * @returns 1 if it is, 0 otherwise.
  **/
 int tdma_slot_is_occupied();
+
+/**
+ * Determines if this device is able to advertise. This is computed by a random
+ * modulo against a counter.
+ *
+ * @returns 1 if it can, 0 otherwise.
+ **/
+int tdma_able_to_advertise();
 
 /**
  * Determines if this device needs to send an advertisement frame
@@ -174,7 +181,14 @@ int tdma_get_distance();
 /**
  * Records a reception error for the current slot.
  **/
-void tdma_rx_error();
+void tdma_frame_error();
+
+void tdma_frame_success();
+
+/**
+ * Increments packet counter for the current slot
+ **/
+void tdma_packet_success();
 
 /**
  * Fills the given frame with the appropriate advertising metadata.

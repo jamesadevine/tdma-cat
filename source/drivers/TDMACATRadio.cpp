@@ -48,7 +48,8 @@ TDMACATRadio* TDMACATRadio::instance = NULL;
 #define FRAME_TRACKER_UNINITIALISED_VALUE     255
 
 #define RADIO_DISABLE_TIME                  3
-#define RADIO_TURNAROUND_TIME_US                       145
+#define RADIO_TURNAROUND_TIME_US            145
+#define RADIO_SHORTS_TURNAROUND_TIME_US     132
 #define RADIO_DISABLE_TOLERANCE             100
 
 // 4 bytes address, 1 prefix, 1 pre amble, 2 crc
@@ -61,6 +62,7 @@ TDMACATRadio* TDMACATRadio::instance = NULL;
 #define TDMA_DISCOVER_BACK_OFF              2000000
 #define TDMA_PREPARATION_OFFSET_US          2000
 #define TDMA_GRACE_PERIOD_US                500
+#define TDMA_SYNC_TOLERANCE                 (TDMA_GRACE_PERIOD_US / 2)
 #define TDMA_CAT_LISTEN_RATE                10
 
 volatile uint32_t packets_received = 0;
@@ -89,13 +91,14 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 // assert the hardware is in the correct state
 #define TDMA_CAT_ASSERT 1
 // send error frames to slots that see a high number of errors
-#define TDMA_SUPPORT_RENEGOTIATION 0
+#define TDMA_CONFIGURATION_SUPPORT_RENEGOTIATION 0
 // use fixed wake up and sleep times, or dynamic ones computed
 // from the table
 #define RADIO_WAKE_DISABLE_CONFIGURATION    STATIC_WAKE_DISABLE
 #define RADIO_DISABLE_CONFIGURATION         RADIO_DISABLE_NEVER
+#define RADIO_DYNAMIC_DISTANCE_SCALING      1
 // set a custom serial number for testing.
-#define TDMA_CUSTOM_SERIAL_NUMBER       14
+#define TDMA_CUSTOM_SERIAL_NUMBER       10
 
 #if TDMA_CAT_TEST_MODE == 1
     TestRole testRole;
@@ -231,6 +234,9 @@ inline int FRAME_SEEN(uint16_t frame_id)
 {
     for (int i = 0; i < FRAME_TRACKER_BUFFER_SIZE; i++)
     {
+        if (frame_tracker[i] == FRAME_TRACKER_UNINITIALISED_VALUE)
+            return 0;
+
         if (frame_id == frame_tracker[i])
             return 1;
     }
@@ -270,6 +276,11 @@ inline void SYNC_TO_FRAME(uint32_t t_end, int ttl, int initial_ttl, int tx_time)
         // gentle drift compensation.
         int error = t_start - TDMA_PREPARATION_OFFSET_US;
         sync_drift = (sync_drift + error) / 2;
+
+        // we're outside of the tolerance bounds, a gentle compensation can no longer help
+        // proper resync on the next frame
+        if (error > TDMA_SYNC_TOLERANCE || error < -(TDMA_SYNC_TOLERANCE))
+            tdmaState = TDMA_STATE_INITIALISATION;
     }
 }
 
@@ -283,15 +294,14 @@ inline void SET_RADIO_DISABLE(uint32_t t_end, int ttl, uint32_t tx_time)
     PPI_ENABLE_CHAN(PPI_CHAN_DIS);
 }
 
-extern void toggle_gpio();
+extern void set_gpio1(int);
 void timer_callback(uint8_t)
 {
+    set_gpio1(1);
     // t = 0 is this timer interrupt!
     // the first packet should be at t = 2 000 us.
     TIMER_CLEAR();
     TIMER_SET_CC(TIMER_CC_TDMA, TDMA_CAT_SLOT_SIZE_US);
-
-    toggle_gpio();
 
     PPI_DISABLE_CHAN(PPI_CHAN_RX_EN);
     PPI_DISABLE_CHAN(PPI_CHAN_TX_EN);
@@ -327,19 +337,12 @@ void timer_callback(uint8_t)
         tdma_set_current_slot(TDMA_CAT_ADVERTISEMENT_SLOT);
     }
 
-    // it is possible to miss new advertisements, so every
-    // modulo (TDMA_CAT_LISTEN_RATE) we listen for a complete window.
-    window_count = ((window_count + 1) % TDMA_CAT_LISTEN_RATE);
-
-    if (window_count == 0 && tdmaState == TDMA_STATE_NORMAL)
-        tdmaState = TDMA_STATE_LISTEN;
-
     // tracks a complete window from the starting slot + table size
     // helps to ensure that the schedule is discovered / re-discovered.
     if (tdmaState == TDMA_STATE_DISCOVER || tdmaState == TDMA_STATE_LISTEN)
     {
         needToReceive = true;
-        int cs = tdma_current_slot_idx();
+        int cs = tdma_current_slot_index();
         if (discover_schedule_start == -1)
             discover_schedule_start = cs;
         else if (discover_schedule_start == cs)
@@ -351,16 +354,27 @@ void timer_callback(uint8_t)
 
     // the time we power up the transmitter is: 2000 - the time it takes to power
     // up the transmitter.
-    int wakeTime = TDMA_PREPARATION_OFFSET_US - RADIO_TURNAROUND_TIME_US;
+    int wakeTime = TDMA_PREPARATION_OFFSET_US - RADIO_SHORTS_TURNAROUND_TIME_US;
     int disableTime = wakeTime;
 
     if (!(tdmaState == TDMA_STATE_DISCOVER) && owner)
     {
         bool needToTransmit = false;
+#if RADIO_DYNAMIC_DISTANCE_SCALING == 1
         int ttl = 1 + tdma_get_distance();
+#else
+        int ttl = 2;
+#endif
 
         if (tdma_is_advertising_slot())
         {
+            // it is possible to miss new advertisements, so every
+            // modulo (TDMA_CAT_LISTEN_RATE) we listen for a complete window.
+            window_count = ((window_count + 1) % TDMA_CAT_LISTEN_RATE);
+
+            if (window_count == 0 && tdmaState == TDMA_STATE_NORMAL)
+                tdmaState = TDMA_STATE_LISTEN;
+
             // crystals generally have a drift. This has implications on the accuracy of timers
             // which may drift by up to 50 us every second.
             // we perform drift compensation based upon an average over time
@@ -372,14 +386,14 @@ void timer_callback(uint8_t)
             tdma_window_tick();
 
             // do we need to send an advert?
-            if (tdma_advert_required())
+            if (tdma_advert_required() && tdma_able_to_advertise())
             {
                 // random backoff
                 needToTransmit = true;
                 wakeTime += microbit_random(TDMA_CAT_SLOT_SIZE_US - 5000);
                 tdma_fill_advertising_frame(&TDMACATRadio::instance->staticFrame);
             }
-#if TDMA_SUPPORT_RENEGOTIATION == 1
+#if TDMA_CONFIGURATION_SUPPORT_RENEGOTIATION == 1
             else if (tdma_renegotiation_required())
             {
                 needToTransmit = true;
@@ -422,7 +436,7 @@ void timer_callback(uint8_t)
             // set reasonable frame defaults
             TDMACATRadio::instance->staticFrame.frame_id = 0;
             TDMACATRadio::instance->staticFrame.flags |= TMDMA_CAT_FRAME_FLAGS_DONE;
-            TDMACATRadio::instance->staticFrame.slot_id = tdma_current_slot_idx();
+            TDMACATRadio::instance->staticFrame.slot_id = tdma_current_slot_index();
 
             NRF_RADIO->PACKETPTR = (uint32_t)&TDMACATRadio::instance->staticFrame;
 
@@ -432,16 +446,18 @@ void timer_callback(uint8_t)
 
             PPI_ENABLE_CHAN(PPI_CHAN_TX_EN);
             PPI_ENABLE_CHAN(PPI_CHAN_END);
+            set_gpio1(0);
             return;
         }
     }
 
     if (tdma_is_advertising_slot())
     {
+        needToReceive = true;
         wakeTime -= TDMA_GRACE_PERIOD_US;
         disableTime = TDMA_CAT_SLOT_SIZE_US;
     }
-    if (tdma_slot_is_occupied())
+    else if (tdma_slot_is_occupied())
     {
         needToReceive = true;
 
@@ -488,13 +504,17 @@ void timer_callback(uint8_t)
         PPI_ENABLE_CHAN(PPI_CHAN_END);
 
     }
+    set_gpio1(0);
 }
+
+extern void set_gpio(int);
 
 #pragma GCC push_options
 #pragma GCC optimize ("O0")
 
 extern "C" void RADIO_IRQHandler(void)
 {
+    set_gpio(1);
     NRF_RADIO->EVENTS_END = 0;
     TDMACATSuperFrame *p = &TDMACATRadio::instance->staticFrame;
 
@@ -509,6 +529,7 @@ extern "C" void RADIO_IRQHandler(void)
         RADIO_ENABLE_READY_START_SHORT();
         NRF_RADIO->TASKS_RXEN = 1;
         packets_forwarded++;
+        set_gpio(0);
         return;
     }
 
@@ -538,12 +559,13 @@ extern "C" void RADIO_IRQHandler(void)
                 correction = 1;
             }
 
+            tdma_frame_success();
             packets_received++;
 
             // we have a little bit of a back porch now whilst the device is retransmitting.
             bool advert = p->flags & TMDMA_CAT_FRAME_FLAGS_ADVERT;
 
-            TDMA_CAT_Slot slot;
+            TDMACATSlot slot;
             slot.device_identifier = p->device_id;
             // if we decrement the ttl, we need to apply a correction.
             // Otherwise the distance calculation will be incorrect
@@ -577,6 +599,8 @@ extern "C" void RADIO_IRQHandler(void)
                 // track frame_id to prevent duplication.
                 TRACK_FRAME(p->frame_id);
 
+                tdma_packet_success();
+
                 // the timer has usefully captured the time of the END event (via PPI)
                 // used in future calculations
                 uint32_t t_end = TIMER_GET_CC(TIMER_CC_TIMESTAMP);
@@ -609,12 +633,13 @@ extern "C" void RADIO_IRQHandler(void)
                 // queue the received frame from our pool of pre-allocated buffers.
                 TDMACATRadio::instance->queueRxFrame(&TDMACATRadio::instance->staticFrame);
             }
+            set_gpio(0);
             return;
         }
         else
         {
             // increments the error counter for current_slot
-            tdma_rx_error();
+            tdma_frame_error();
             packets_error++;
         }
 
@@ -629,6 +654,7 @@ extern "C" void RADIO_IRQHandler(void)
         NRF_RADIO->EVENTS_DISABLED = 0;
         RADIO_ENABLE_READY_START_SHORT();
         NRF_RADIO->TASKS_RXEN = 1;
+        set_gpio(0);
         return;
     }
 
@@ -647,6 +673,7 @@ extern "C" void RADIO_IRQHandler(void)
         RADIO_ENABLE_READY_START_SHORT();
         NRF_RADIO->TASKS_RXEN = 1;
         packets_transmitted++;
+        set_gpio(0);
         return;
     }
 }
@@ -705,7 +732,7 @@ TDMACATRadio::TDMACATRadio(LowLevelTimer& timer, uint16_t id) : timer(timer)
     serial_number = microbit_serial_number();
 #endif
 
-    log_int("OUR_DI", serial_number);
+    SERIAL_DEBUG->printf("DEVICE ID: %d\r\n",serial_number);
     tdma_init(serial_number);
 
     instance = this;
@@ -880,6 +907,7 @@ int TDMACATRadio::enable()
     NRF_RADIO->POWER = 0;
     NRF_RADIO->POWER = 1;
 
+    // NRF_RADIO->TXPOWER = (uint32_t)MICROBIT_BLE_POWER_LEVEL[0];
     NRF_RADIO->TXPOWER = (uint32_t)MICROBIT_BLE_POWER_LEVEL[6];
     NRF_RADIO->FREQUENCY = MICROBIT_RADIO_DEFAULT_FREQUENCY;
 
