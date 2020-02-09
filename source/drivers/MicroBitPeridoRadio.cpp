@@ -41,6 +41,8 @@ MicroBitPeridoRadio* MicroBitPeridoRadio::instance = NULL;
 #define TIME_TO_TRANSMIT_BYTE_1MB   8
 #define TX_PACKETS_SIZE             (2 * MICROBIT_PERIDO_MAXIMUM_TX_BUFFERS)
 
+#define SPIN_DELAY_COUNT            250
+
 volatile uint32_t packets_received = 0;
 volatile uint32_t packets_error = 0;
 volatile uint32_t packets_transmitted = 0;
@@ -99,7 +101,7 @@ extern "C" void RADIO_IRQHandler(void)
         HW_ASSERT(0,0);
 #endif
         NRF_RADIO->TASKS_RXEN = 1;
-        volatile int i = 250;
+        volatile int i = SPIN_DELAY_COUNT;
         while(i-- > 0);
         NRF_RADIO->TASKS_START = 1;
         packets_forwarded++;
@@ -124,8 +126,37 @@ extern "C" void RADIO_IRQHandler(void)
 #endif
                     NRF_RADIO->EVENTS_DISABLED = 0;
                     NRF_RADIO->TASKS_TXEN = 1;
-                    volatile int i = 250;
+                    set_transmission_reception_gpio(1);
+                    volatile int i = SPIN_DELAY_COUNT;
                     while(i-- > 0);
+            asm volatile(
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+            // "NOP\r\n"
+        );
+                    set_transmission_reception_gpio(0);
                     NRF_RADIO->TASKS_START = 1;
                     return;
                 }
@@ -138,11 +169,10 @@ extern "C" void RADIO_IRQHandler(void)
 #if MICROBIT_PERIDO_ASSERT == 1
             HW_ASSERT(0,0);
 #endif
+            NRF_RADIO->EVENTS_READY = 0;
             NRF_RADIO->EVENTS_DISABLED = 0;
             NRF_RADIO->TASKS_RXEN = 1;
-
-            volatile int i = 250;
-            while(i-- > 0);
+            while(NRF_RADIO->EVENTS_READY == 0);
             NRF_RADIO->TASKS_START = 1;
         }
         else
@@ -155,13 +185,13 @@ extern "C" void RADIO_IRQHandler(void)
 #if MICROBIT_PERIDO_ASSERT == 1
             HW_ASSERT(0,0);
 #endif
+            NRF_RADIO->EVENTS_READY = 0;
             NRF_RADIO->EVENTS_DISABLED = 0;
             NRF_RADIO->TASKS_RXEN = 1;
 
             process_packet(p, NRF_RADIO->CRCSTATUS == 1, NRF_RADIO->RSSISAMPLE);
             memset(p, 0, sizeof(PeridoFrameBuffer));
-            volatile int i = 250;
-            while(i-- > 0);
+            while(NRF_RADIO->EVENTS_READY == 0);
             NRF_RADIO->TASKS_START = 1;
         }
         return;
@@ -181,6 +211,9 @@ extern "C" void RADIO_IRQHandler(void)
 #endif
                 NRF_RADIO->EVENTS_DISABLED = 0;
                 NRF_RADIO->TASKS_TXEN = 1;
+                volatile int i = SPIN_DELAY_COUNT;
+                while(i-- > 0);
+                NRF_RADIO->TASKS_START = 1;
                 packets_received++;
                 return;
             }
@@ -197,6 +230,9 @@ extern "C" void RADIO_IRQHandler(void)
 #endif
         NRF_RADIO->EVENTS_DISABLED = 0;
         NRF_RADIO->TASKS_RXEN = 1;
+        volatile int i = SPIN_DELAY_COUNT;
+        while(i-- > 0);
+        NRF_RADIO->TASKS_START = 1;
         return;
     }
 #endif
@@ -213,8 +249,10 @@ extern "C" void RADIO_IRQHandler(void)
         NRF_RADIO->TASKS_RXEN = 1;
         packets_transmitted++;
 
-        volatile int i = 250;
+        set_transmission_reception_gpio(0);
+        volatile int i = SPIN_DELAY_COUNT;
         while(i-- > 0);
+        set_transmission_reception_gpio(1);
         NRF_RADIO->TASKS_START = 1;
         return;
     }
@@ -236,7 +274,7 @@ void manual_poke(PeridoFrameBuffer* p)
     NRF_RADIO->PACKETPTR = (uint32_t)p;
     NRF_RADIO->TASKS_TXEN = 1;
 
-    volatile int i = 250;
+    volatile int i = SPIN_DELAY_COUNT;
     while(i-- > 0);
     NRF_RADIO->TASKS_START = 1;
 }
@@ -576,7 +614,7 @@ int MicroBitPeridoRadio::enable()
 
     NRF_RADIO->TASKS_RXEN = 1;
 
-    volatile int i = 250;
+    volatile int i = SPIN_DELAY_COUNT;
     while(i-- > 0);
     NRF_RADIO->TASKS_START = 1;
 
@@ -825,6 +863,9 @@ int MicroBitPeridoRadio::sendTestResults(uint8_t* data, uint8_t length)
 
     NRF_RADIO->EVENTS_END = 0;
     NRF_RADIO->TASKS_TXEN = 1;
+    volatile int i = SPIN_DELAY_COUNT;
+    while(i-- > 0);
+    NRF_RADIO->TASKS_START = 1;
     while (NRF_RADIO->EVENTS_END == 0);
 
     NRF_RADIO->EVENTS_END = 0;
