@@ -323,8 +323,8 @@ static void tdma_compute_avgs()
 void tdma_window_tick()
 {
     tdma_expire();
-    tdma_flag_errors();
-    tdma_compute_avgs();
+    // tdma_flag_errors();
+    // tdma_compute_avgs();
 }
 
 int tdma_slot_distance()

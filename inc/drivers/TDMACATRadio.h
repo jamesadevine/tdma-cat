@@ -64,7 +64,7 @@ struct TDMACATSuperFrame;
  */
 
 #define IGNORE_FUTURE_PROBLEMS              1
-#define TDMA_CAT_TEST_MODE                  0
+#define TDMA_CAT_TEST_MODE                  1
 
 // #ifndef TDMA_CAT_DIRECT_DEBUG
 // #define TDMA_CAT_DIRECT_DEBUG               1
@@ -126,6 +126,16 @@ struct TDMACATSuperFrame
 
 
 #if TDMA_CAT_TEST_MODE == 1
+
+struct TDMACATTestFrame
+{
+    uint8_t             length;                             // The length of the remaining bytes in the packet.
+    uint8_t             slot_id;
+    uint8_t             frame_id:4, flags:4;
+    uint8_t             ttl:4, initial_ttl:4;
+    uint64_t            device_id;
+    uint8_t             payload[240];    // User / higher layer protocol data
+} __attribute__((packed));
 
 enum TestRole {
   Transmitter,
