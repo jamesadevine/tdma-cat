@@ -50,7 +50,7 @@ TDMACATRadio* TDMACATRadio::instance = NULL;
 #define RADIO_DISABLE_TIME                  3
 #define RADIO_TURNAROUND_TIME_US            145
 #define RADIO_SHORTS_TURNAROUND_TIME_US     132
-#define RADIO_DISABLE_TOLERANCE             100
+#define RADIO_DISABLE_TOLERANCE             300
 
 // 4 bytes address, 1 prefix, 1 pre amble, 2 crc
 #define RADIO_ON_AIR_BYTES                  8
@@ -85,6 +85,9 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 #define RADIO_DISABLE_NEVER             1
 #define RADIO_DISABLE_WHERE_POSSIBLE    2
 
+#define RADIO_DYNAMIC_TTL               100
+#define RADIO_FIXED_TTL                 6
+
 /**
   * Driver configuration flags
   **/
@@ -96,9 +99,10 @@ volatile uint8_t frame_tracker[FRAME_TRACKER_BUFFER_SIZE] = { 0 };
 // from the table
 #define RADIO_WAKE_DISABLE_CONFIGURATION    STATIC_WAKE_DISABLE
 #define RADIO_DISABLE_CONFIGURATION         RADIO_DISABLE_NEVER
-#define RADIO_DYNAMIC_DISTANCE_SCALING      1
+#define RADIO_TTL_CALCULATION               RADIO_DYNAMIC_TTL
+
 // set a custom serial number for testing.
-#define TDMA_CUSTOM_SERIAL_NUMBER       10
+#define TDMA_CUSTOM_SERIAL_NUMBER       5
 
 #if TDMA_CAT_TEST_MODE == 1
     TestRole testRole;
@@ -246,9 +250,6 @@ inline int FRAME_SEEN(uint16_t frame_id)
 
 inline void TRACK_FRAME(uint16_t frame_id)
 {
-#if TDMA_CAT_TEST_MODE == 1
-    // NOP, we want to process all frames
-#else
     for (int i = 0; i < FRAME_TRACKER_BUFFER_SIZE; i++)
     {
         if (frame_tracker[i] == FRAME_TRACKER_UNINITIALISED_VALUE)
@@ -257,7 +258,6 @@ inline void TRACK_FRAME(uint16_t frame_id)
             return;
         }
     }
-#endif
 }
 
 inline void SYNC_TO_FRAME(uint32_t t_end, int ttl, int initial_ttl, int tx_time)
@@ -362,10 +362,10 @@ void timer_callback(uint8_t)
     if (!(tdmaState == TDMA_STATE_DISCOVER) && owner)
     {
         bool needToTransmit = false;
-#if RADIO_DYNAMIC_DISTANCE_SCALING == 1
+#if RADIO_TTL_CALCULATION == RADIO_DYNAMIC_TTL
         int ttl = 1 + tdma_get_distance();
 #else
-        int ttl = 2;
+        int ttl = RADIO_FIXED_TTL;
 #endif
 
         if (tdma_is_advertising_slot())
@@ -410,13 +410,9 @@ void timer_callback(uint8_t)
             needToTransmit = true;
 
             TDMACATSuperFrame* p = TDMACATRadio::instance->popTxQueue();
-
-            if (p)
-            {
-                memcpy(&TDMACATRadio::instance->staticFrame, p, sizeof(TDMACATSuperFrame));
-                // return the buffer to the pool of buffers
-                TDMACATRadio::instance->addBufferToPool(p);
-            }
+            memcpy(&TDMACATRadio::instance->staticFrame, p, sizeof(TDMACATSuperFrame));
+            // return the buffer to the pool of buffers
+            TDMACATRadio::instance->addBufferToPool(p);
             TDMACATRadio::instance->staticFrame.ttl = ttl;
             TDMACATRadio::instance->staticFrame.initial_ttl = ttl;
         }
@@ -561,6 +557,9 @@ extern "C" void RADIO_IRQHandler(void)
             // we have a little bit of a back porch now whilst the device is retransmitting.
             bool advert = p->flags & TMDMA_CAT_FRAME_FLAGS_ADVERT;
 
+            process_packet(&TDMACATRadio::instance->staticFrame, true, correction);
+
+
             TDMACATSlot slot;
             slot.device_identifier = p->device_id;
             // if we decrement the ttl, we need to apply a correction.
@@ -608,10 +607,10 @@ extern "C" void RADIO_IRQHandler(void)
                 // compute disable time.
 
                 // (note for now there is only one frame per slot)
-#if RADIO_DISABLE_CONFIGURATION == RADIO_DISABLE_WHERE_POSSIBLE
+// #if RADIO_DISABLE_CONFIGURATION == RADIO_DISABLE_WHERE_POSSIBLE
                 if (p->flags & TMDMA_CAT_FRAME_FLAGS_DONE)
                     SET_RADIO_DISABLE(t_end, p->ttl + correction, tx_time);
-#endif
+// #endif
 
                 // only sync to the first frame in a slot.
                 // (also ensure the slot isn't our own, syncing yourself is
@@ -624,12 +623,12 @@ extern "C" void RADIO_IRQHandler(void)
                     tdma_set_slot(slot, false);
                 }
 
-                // queue the received frame from our pool of pre-allocated buffers.
-#if TDMA_CAT_TEST_MODE == 1
-                process_packet(&TDMACATRadio::instance->staticFrame, true, correction);
-#else
-                TDMACATRadio::instance->queueRxFrame(&TDMACATRadio::instance->staticFrame);
-#endif
+// #if TDMA_CAT_TEST_MODE == 1
+//                 process_packet(&TDMACATRadio::instance->staticFrame, true, correction);
+// #else
+//                 // queue the received frame from our pool of pre-allocated buffers.
+//                 TDMACATRadio::instance->queueRxFrame(&TDMACATRadio::instance->staticFrame);
+// #endif
             }
             return;
         }
@@ -846,7 +845,7 @@ int TDMACATRadio::queueTxFrame(TDMACATSuperFrame* s)
 {
     TDMACATSuperFrame* p = getBufferFromPool();
 
-    if (p == NULL)
+    if (p == NULL || queueSize(&this->txTail, &this->txHead) == TDMA_CAT_EFFECTIVE_QUEUE_SIZE)
         return MICROBIT_NO_RESOURCES;
 
     memcpy(p, s, sizeof(TDMACATSuperFrame));
@@ -1122,7 +1121,7 @@ int TDMACATRadio::send(uint8_t *buffer, int len)
 
     TDMACATSuperFrame buf;
 
-    buf.device_id = microbit_serial_number();
+    buf.device_id = serial_number;
     buf.slot_id = 0;
     buf.frame_id = 0;
     buf.flags = 0;

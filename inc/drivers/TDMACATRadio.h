@@ -91,6 +91,7 @@ struct TDMACATSuperFrame;
 #define TDMA_CAT_BUFFER_POOL_SIZE           20
 // add one for the empty slot
 #define TDMA_CAT_QUEUE_SIZE                 ((TDMA_CAT_BUFFER_POOL_SIZE / 2) + 1)
+#define TDMA_CAT_EFFECTIVE_QUEUE_SIZE                 ((TDMA_CAT_BUFFER_POOL_SIZE / 2))
 
 #ifndef MICROBIT_RADIO_MAXIMUM_RX_BUFFERS
 #define MICROBIT_RADIO_MAXIMUM_RX_BUFFERS   10
