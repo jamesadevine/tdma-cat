@@ -173,7 +173,7 @@ inline uint32_t TIMER_GET_CC(uint8_t channel)
 
 inline void TIMER_ENABLE_CC_IRQ(uint8_t channel)
 {
-    NRF_TIMER0->INTENSET |= (1 << (TIMER_INTENSET_COMPARE0_Pos + channel));
+    NRF_TIMER0->INTENSET = (1 << (TIMER_INTENSET_COMPARE0_Pos + channel));
 }
 
 inline void TIMER_ENABLE_IRQ()
